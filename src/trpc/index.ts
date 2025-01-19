@@ -1,29 +1,17 @@
-import { router, publicProcedure } from './trpc';
-import { google } from 'googleapis';
+import { router, publicProcedure, createCallerFactory } from './trpc';
 import type { GaxiosResponse } from 'googleapis-common';
 import { gmail_v1 } from 'googleapis';
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { TRPCError } from '@trpc/server';
 
 export const appRouter = router({
   hello: publicProcedure.query(() => 'Hello World'),
-  getRecentEmail: publicProcedure.query(async () => {
-    const session = await getServerSession(authOptions);
-  
-    if (!session?.accessToken) {
+  getRecentEmail: publicProcedure.query(async ({ ctx }) => {
+    if (!ctx.gmail) {
       throw new TRPCError({ code: 'UNAUTHORIZED' });
     }
 
     try {
-      const oauth2Client = new google.auth.OAuth2();
-      oauth2Client.setCredentials({
-        access_token: session.accessToken as string,
-      });
-
-      const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-      
-      const response = await gmail.users.messages.list({
+      const response = await ctx.gmail.users.messages.list({
         userId: 'me',
         maxResults: 1,
       });
@@ -33,7 +21,7 @@ export const appRouter = router({
       }
 
       const messageId = response.data.messages[0].id!;
-      const message: GaxiosResponse<gmail_v1.Schema$Message> = await gmail.users.messages.get({
+      const message: GaxiosResponse<gmail_v1.Schema$Message> = await ctx.gmail.users.messages.get({
         userId: 'me',
         id: messageId,
       });
@@ -61,3 +49,4 @@ export const appRouter = router({
 // Export type router type signature,
 // NOT the router itself.
 export type AppRouter = typeof appRouter;
+export const createCaller = createCallerFactory(appRouter);

@@ -49,6 +49,6 @@ export const Hello = () => {
   return <div>
     <div>Loading: {isLoading ? 'Yes' : 'No'}</div>
     <div>Error: {JSON.stringify(error)}</div>
-    <div>Data: {data}</div>
+    <div>Data: {data }</div>
   </div>;
 };
