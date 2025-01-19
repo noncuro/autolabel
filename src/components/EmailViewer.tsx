@@ -1,32 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import { trpc } from '@/trpc/client';
 
 export default function EmailViewer() {
   const { data: session } = useSession();
-  const [email, setEmail] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchEmail = async () => {
-      try {
-        const response = await fetch('/api/emails/recent');
-        if (!response.ok) throw new Error('Failed to fetch email');
-        const data = await response.json();
-        setEmail(data);
-      } catch (error) {
-        console.error('Error fetching email:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (session) {
-      fetchEmail();
-    }
-  }, [session]);
+  const { data: email, isLoading: loading } = trpc.getRecentEmail.useQuery(undefined, {
+    enabled: !!session
+  });
 
   if (loading) {
     return (
