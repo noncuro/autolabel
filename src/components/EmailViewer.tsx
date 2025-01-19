@@ -35,20 +35,13 @@ export default function EmailViewer() {
         
         <div className="border-t border-[var(--border)] pt-4">
           <div 
-            className="prose prose-sm dark:prose-invert max-w-none"
-            dangerouslySetInnerHTML={{ __html: email.body }} 
-          />
+            className="prose prose-sm dark:prose-invert max-w-none" 
+          >
+            Snippet: {email.snippet}
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-export const Hello = () => {
-  const { data, isLoading, error } = trpc.hello.useQuery();
-  return <div>
-    <div>Loading: {isLoading ? 'Yes' : 'No'}</div>
-    <div>Error: {JSON.stringify(error)}</div>
-    <div>Data: {data }</div>
-  </div>;
-};

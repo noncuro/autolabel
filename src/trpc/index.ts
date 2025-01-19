@@ -29,12 +29,12 @@ export const appRouter = router({
       const headers = message.data.payload?.headers;
       const subject = headers?.find((h) => h.name === 'Subject')?.value;
       const from = headers?.find((h) => h.name === 'From')?.value;
-      const body = message.data.snippet;
+      const snippet = message.data.snippet;
 
       return {
         subject,
         from,
-        body,
+        snippet,
       };
     } catch (error) {
       console.error('Error fetching email:', error);

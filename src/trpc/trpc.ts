@@ -35,18 +35,28 @@ export const router = t.router;
 export const createTRPCContext = cache(async () => {
   const session = await getServerSession(authOptions);
   
-  if (!session?.accessToken) {
+  console.log('Creating TRPC context with session:', {
+    hasAccessToken: !!session?.accessToken,
+    hasError: !!session?.error,
+    expiresAt: session?.expiresAt
+  });
+  
+  if (!session?.accessToken || session.error === 'RefreshAccessTokenError') {
+    console.log('No valid access token available');
     return { gmail: null };
   }
 
-  const oauth2Client = new google.auth.OAuth2();
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET
+  );
+  
   oauth2Client.setCredentials({
-    access_token: session.accessToken as string,
+    access_token: session.accessToken,
   });
 
   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
   return { gmail };
-
 });
 
 /**
