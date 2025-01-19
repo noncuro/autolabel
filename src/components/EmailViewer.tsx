@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
+import { trpc } from '@/trpc/client';
 
 export default function EmailViewer() {
   const { data: session } = useSession();
@@ -61,3 +62,12 @@ export default function EmailViewer() {
     </div>
   );
 }
+
+export const Hello = () => {
+  const { data, isLoading, error } = trpc.hello.useQuery();
+  return <div>
+    <div>Loading: {isLoading ? 'Yes' : 'No'}</div>
+    <div>Error: {JSON.stringify(error)}</div>
+    <div>Data: {data}</div>
+  </div>;
+};
