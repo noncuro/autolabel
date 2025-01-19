@@ -5,42 +5,64 @@ import { TRPCError } from '@trpc/server';
 
 export const appRouter = router({
   hello: publicProcedure.query(() => 'Hello World'),
-  getRecentEmail: publicProcedure.query(async ({ ctx }) => {
+  getRecentEmails: publicProcedure.query(async ({ ctx }) => {
     if (!ctx.gmail) {
       throw new TRPCError({ code: 'UNAUTHORIZED' });
     }
 
     try {
-      const response = await ctx.gmail.users.messages.list({
+      const threadResponse = await ctx.gmail.users.threads.list({
         userId: 'me',
-        maxResults: 1,
+        maxResults: 10,
+        q: 'in:inbox'
       });
 
-      if (!response.data.messages?.length) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'No emails found' });
+      if (!threadResponse.data.threads?.length) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'No email threads found' });
       }
 
-      const messageId = response.data.messages[0].id!;
-      const message: GaxiosResponse<gmail_v1.Schema$Message> = await ctx.gmail.users.messages.get({
-        userId: 'me',
-        id: messageId,
+      // Get all labels first to have their names
+      const labelsResponse = await ctx.gmail.users.labels.list({
+        userId: 'me'
       });
+      
+      const labelMap = new Map(
+        labelsResponse.data.labels?.map(label => [label.id, label.name]) || []
+      );
 
-      const headers = message.data.payload?.headers;
-      const subject = headers?.find((h) => h.name === 'Subject')?.value;
-      const from = headers?.find((h) => h.name === 'From')?.value;
-      const snippet = message.data.snippet;
+      const threadsWithMessages = await Promise.all(
+        threadResponse.data.threads.map(async (thread) => {
+          const threadDetails = await ctx.gmail.users.threads.get({
+            userId: 'me',
+            id: thread.id!,
+          });
+          const firstMessage = threadDetails.data.messages?.[0];
+          if (!firstMessage) return null;
 
-      return {
-        subject,
-        from,
-        snippet,
-      };
+          const headers = firstMessage.payload?.headers;
+          const labels = firstMessage.labelIds?.map(labelId => ({
+            id: labelId,
+            name: labelMap.get(labelId) || labelId
+          })) || [];
+
+          return {
+            id: firstMessage.id,
+            subject: headers?.find((h) => h.name === 'Subject')?.value || 'No Subject',
+            from: headers?.find((h) => h.name === 'From')?.value || '',
+            to: headers?.find((h) => h.name === 'To')?.value || '',
+            date: headers?.find((h) => h.name === 'Date')?.value || '',
+            snippet: firstMessage.snippet || '',
+            labels,
+          };
+        })
+      );
+
+      return threadsWithMessages.filter((thread): thread is NonNullable<typeof thread> => thread !== null);
     } catch (error) {
-      console.error('Error fetching email:', error);
+      console.error('Error fetching email threads:', error);
       throw new TRPCError({ 
         code: 'INTERNAL_SERVER_ERROR',
-        message: 'Error fetching email'
+        message: 'Error fetching email threads'
       });
     }
   }),
