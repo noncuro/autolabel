@@ -27,6 +27,20 @@ export default function EmailViewer() {
     }
   );
 
+  const handleDownload = () => {
+    if (!data) return;
+    const allEmails = data.pages.flatMap(page => page.items);
+    const blob = new Blob([JSON.stringify(allEmails, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'emails.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   useEffect(() => {
     if (inView && hasNextPage && !isFetchingNextPage) {
       fetchNextPage();
@@ -51,8 +65,20 @@ export default function EmailViewer() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-4">
+      <div className="flex justify-between items-center p-4 bg-gray-50 rounded-lg">
+      <button
+          onClick={handleDownload}
+          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm"
+        >
+          Download Emails
+        </button>
+        <div className="text-sm text-gray-600">
+          {data.pages.reduce((acc, page) => acc + page.items.length, 0)} emails loaded
+        </div>
+        
+      </div>
       {data.pages.map((page) =>
-        page.items.map((email, index) => (
+        page.items.map((email) => (
           <EmailCard key={email.id} email={email} />
         ))
       )}
