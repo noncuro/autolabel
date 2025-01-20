@@ -38,7 +38,9 @@ export const createTRPCContext = cache(async () => {
   console.log('Creating TRPC context with session:', {
     hasAccessToken: !!session?.accessToken,
     hasError: !!session?.error,
-    expiresAt: session?.expiresAt
+    expiresAt: session?.expiresAt,
+    accessTokenPrefix: session?.accessToken?.substring(0, 10),
+    refreshTokenPrefix: session?.refreshToken?.substring(0, 10)
   });
   
   if (!session?.accessToken || session.error === 'RefreshAccessTokenError') {
@@ -48,12 +50,47 @@ export const createTRPCContext = cache(async () => {
 
   const oauth2Client = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.NEXTAUTH_URL
   );
+  
+  console.log('Setting OAuth2 credentials:', {
+    hasAccessToken: !!session.accessToken,
+    hasRefreshToken: !!session.refreshToken,
+    expiryDate: session.expiresAt ? new Date(session.expiresAt * 1000).toISOString() : undefined,
+    redirectUri: process.env.NEXTAUTH_URL
+  });
   
   oauth2Client.setCredentials({
     access_token: session.accessToken,
+    refresh_token: session.refreshToken,
+    expiry_date: session.expiresAt ? session.expiresAt * 1000 : undefined
   });
+
+  // Enable automatic token refresh
+  oauth2Client.on('tokens', (tokens) => {
+    console.log('New tokens received:', {
+      hasAccessToken: !!tokens.access_token,
+      hasRefreshToken: !!tokens.refresh_token,
+      expiryDate: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : undefined
+    });
+  });
+
+  try {
+    // Test the credentials before creating the Gmail client
+    await oauth2Client.getAccessToken();
+    console.log('Successfully validated access token');
+  } catch (error) {
+    console.error('Error validating access token:', error);
+    if (error instanceof Error) {
+      console.error('Error details:', {
+        message: error.message,
+        name: error.name,
+        stack: error.stack
+      });
+    }
+    return { gmail: null };
+  }
 
   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
   return { gmail };

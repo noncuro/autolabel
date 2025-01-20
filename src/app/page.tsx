@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth/next";
 import { redirect } from "next/navigation";
 import EmailViewer from "../components/EmailViewer";
 import Providers from "../components/Providers";
+import NavBar from "../components/NavBar";
 import { authOptions } from "./api/auth/[...nextauth]/route";
 
 export default async function Home() {
@@ -12,9 +13,12 @@ export default async function Home() {
   }
 
   return (
-    <main className="p-4">
+    <main>
       <Providers>
-        <EmailViewer />
+        <NavBar />
+        <div className="p-4">
+          <EmailViewer />
+        </div>
       </Providers>
     </main>
   );

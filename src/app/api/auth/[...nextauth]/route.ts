@@ -21,7 +21,7 @@ declare module "next-auth/jwt" {
   }
 }
 
-async function refreshAccessToken(token: JWT) {
+async function refreshAccessToken(token: JWT): Promise<JWT> {
   try {
     console.log('Refreshing access token...');
     const oauth2Client = new google.auth.OAuth2(
@@ -39,7 +39,7 @@ async function refreshAccessToken(token: JWT) {
 
     return {
       ...token,
-      accessToken: credentials.access_token,
+      accessToken: credentials.access_token ?? undefined,
       refreshToken: token.refreshToken,
       expiresAt: Math.floor((Date.now() + (credentials.expiry_date || 3600 * 1000)) / 1000),
       error: undefined,
@@ -69,7 +69,7 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   callbacks: {
-    async jwt({ token, account }) {
+    async jwt({ token, account }): Promise<JWT> {
       if (account) {
         console.log('Initial sign in, setting tokens');
         return {
