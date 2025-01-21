@@ -27,40 +27,19 @@ export default function EmailViewer() {
       retry: false,
     },
   );
-  const utils = trpc.useUtils();
+  // const utils = trpc.useUtils();
 
   const bulkCategorize = trpc.gmail.bulkCategorizeAndLabel.useMutation({
     onSuccess: (data) => {
       // Refresh the email list to show new labels
-      utils.gmail.getRecentEmails.invalidate();
+      // utils.gmail.getRecentEmails.invalidate();
       if (data.skippedCount > 0) {
-        alert(`Categorization complete!\nProcessed: ${data.results.length} emails\nSkipped: ${data.skippedCount} already processed emails`);
+        console.log(`Categorization complete!\nProcessed: ${data.results.length} emails\nSkipped: ${data.skippedCount} already processed emails`);
       }
     },
   });
 
-  const handleBulkCategorize = async () => {
-    if (!data) return;
-    const allEmails = data.pages.flatMap((page) => page.items);
-    try {
-      await bulkCategorize.mutate({ emails: allEmails });
-    } catch (error) {
-      console.error('Failed to bulk categorize:', error);
-      alert('Failed to bulk categorize emails. See console for details.');
-    }
-  };
-
-  const handleLoadMore = async () => {
-    if (!hasNextPage || isFetching) return;
-    // Load 10 pages (100 emails) or until we run out of pages
-    for (let i = 0; i < 10; i++) {
-      const result = await fetchNextPage();
-      if (!result.data?.pages[result.data.pages.length - 1].nextCursor) {
-        break;
-      }
-    }
-  };
-
+  
   const handleDownload = () => {
     if (!data) return;
     const allEmails = data.pages.flatMap((page) => page.items);
@@ -110,7 +89,7 @@ export default function EmailViewer() {
             Download Emails
           </button>
           <button
-            onClick={handleBulkCategorize}
+            onClick={() => bulkCategorize.mutate({emails: data?.pages.flatMap((page) => page.items)})}
             disabled={bulkCategorize.isPending || !data?.pages[0].items.length}
             className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:bg-purple-300 text-sm"
           >
@@ -118,7 +97,7 @@ export default function EmailViewer() {
           </button>
           {hasNextPage && (
             <button
-              onClick={handleLoadMore}
+              onClick={() => fetchNextPage()}
               disabled={isFetching}
               className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:bg-green-300 text-sm"
             >
