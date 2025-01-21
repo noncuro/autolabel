@@ -9,6 +9,7 @@ import { ZodError } from "zod";
 
 export type Context = {
   gmail: gmail_v1.Gmail | null;
+  userEmail: string | null;
 };
 
 const t = initTRPC.context<typeof createTRPCContext>().create({
@@ -32,18 +33,10 @@ export const router = t.router;
 
 export const createTRPCContext = cache(async () => {
   const session = await getServerSession(authOptions);
-
-  console.log("Creating TRPC context with session:", {
-    hasAccessToken: !!session?.accessToken,
-    hasError: !!session?.error,
-    expiresAt: session?.expiresAt,
-    accessTokenPrefix: session?.accessToken?.substring(0, 10),
-    refreshTokenPrefix: session?.refreshToken?.substring(0, 10),
-  });
-
+  
   if (!session?.accessToken || session.error === "RefreshAccessTokenError") {
     console.log("No valid access token available");
-    return { gmail: null };
+    return { gmail: null, userEmail: null };
   }
 
   const oauth2Client = new google.auth.OAuth2(
@@ -91,11 +84,16 @@ export const createTRPCContext = cache(async () => {
         stack: error.stack,
       });
     }
-    return { gmail: null };
+    return { gmail: null, userEmail: null };
   }
 
+  console.log("Session:", session)
+
   const gmail = google.gmail({ version: "v1", auth: oauth2Client });
-  return { gmail };
+  return { 
+    gmail,
+    userEmail: session.user?.email ?? null 
+  };
 });
 
 /**

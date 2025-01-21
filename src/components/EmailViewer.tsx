@@ -17,9 +17,9 @@ export default function EmailViewer() {
     fetchNextPage,
     isFetchingNextPage,
     isFetching,
-  } = trpc.getRecentEmails.useInfiniteQuery(
+  } = trpc.gmail.getRecentEmails.useInfiniteQuery(
     {
-      limit: 10,
+      limit: 3,
     },
     {
       enabled: !!session,
