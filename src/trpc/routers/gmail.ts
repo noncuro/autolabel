@@ -4,7 +4,6 @@ import { publicProcedure, router } from "../trpc";
 import { getRedis } from "@/services/redis";
 import { categorizeEmail, EmailCategorySchema } from "@/services/openai";
 import { gmail_v1 } from "googleapis";
-import { GaxiosError } from "gaxios";
 
 const EmailSchema = z.object({
   id: z.string(),
@@ -21,48 +20,6 @@ const EmailSchema = z.object({
     }),
   ),
 });
-
-// Rate limiting constants
-const RATE_LIMIT_WINDOW = 100; // 100 seconds
-const MAX_REQUESTS_PER_WINDOW = 250; // Gmail API quota is typically 250 requests per 100 seconds per user
-
-async function checkRateLimit(userId: string): Promise<boolean> {
-  const redis = getRedis();
-  const key = `gmail-rate-limit:${userId}`;
-  const current = await redis.incr(key);
-  if (current === 1) {
-    await redis.expire(key, RATE_LIMIT_WINDOW);
-  }
-  return current <= MAX_REQUESTS_PER_WINDOW;
-}
-
-async function handleGmailError(error: unknown): never {
-  console.error("Gmail API error:", error);
-  
-  if (error instanceof GaxiosError) {
-    const status = error.response?.status;
-    const message = error.response?.data?.error?.message || error.message;
-    
-    if (status === 429 || message?.includes("Resource has been exhausted")) {
-      throw new TRPCError({
-        code: "TOO_MANY_REQUESTS",
-        message: "Gmail API quota exceeded. Please try again later.",
-      });
-    }
-    
-    if (status === 403) {
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message: "Access denied. Please check your Gmail permissions.",
-      });
-    }
-  }
-  
-  throw new TRPCError({
-    code: "INTERNAL_SERVER_ERROR",
-    message: "An error occurred while accessing Gmail. Please try again later.",
-  });
-}
 
 async function getGmailLabels(
   gmail: gmail_v1.Gmail,
@@ -115,16 +72,8 @@ export const gmailRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      if (!ctx.gmail || !ctx.session?.user?.email) {
+      if (!ctx.gmail) {
         throw new TRPCError({ code: "UNAUTHORIZED" });
-      }
-
-      const canProceed = await checkRateLimit(ctx.session.user.email);
-      if (!canProceed) {
-        throw new TRPCError({
-          code: "TOO_MANY_REQUESTS",
-          message: "Rate limit exceeded. Please try again later.",
-        });
       }
 
       try {
@@ -217,7 +166,30 @@ export const gmailRouter = router({
           nextCursor: threadResponse.data.nextPageToken || undefined,
         };
       } catch (error) {
-        await handleGmailError(error);
+        console.error("Error fetching email threads:", error);
+        if (error instanceof Error) {
+          console.error("Error details:", {
+            message: error.message,
+            name: error.name,
+            stack: error.stack?.split("\n").slice(0, 10).join("\n"),
+          });
+
+          // Log the full error object for debugging
+          if ("config" in error) {
+            console.error("Request config:", {
+              url: (error as any).config?.url,
+              headers: (error as any).config?.headers,
+              params: (error as any).config?.params,
+            });
+          }
+          if ("response" in error) {
+            console.error("Response data:", (error as any).response?.data);
+          }
+        }
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Error fetching email threads",
+        });
       }
     }),
   categorizeEmail: publicProcedure
@@ -324,84 +296,123 @@ export const gmailRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      if (!ctx.gmail || !ctx.session?.user?.email) {
+      if (!ctx.gmail) {
         throw new TRPCError({ code: "UNAUTHORIZED" });
       }
 
-      const canProceed = await checkRateLimit(ctx.session.user.email);
-      if (!canProceed) {
+      const currentUserEmailAddress = ctx.userEmail;
+      if (!currentUserEmailAddress) {
         throw new TRPCError({
-          code: "TOO_MANY_REQUESTS",
-          message: "Rate limit exceeded. Please try again later.",
+          code: "UNAUTHORIZED",
+          message: "User email address not found",
         });
       }
 
-      // Process in smaller batches to avoid hitting rate limits
-      const BATCH_SIZE = 10;
-      const batches = [];
-      for (let i = 0; i < input.emails.length; i += BATCH_SIZE) {
-        batches.push(input.emails.slice(i, i + BATCH_SIZE));
-      }
+      const redis = getRedis();
 
-      const results = [];
-      let skippedCount = 0;
-
-      for (const batch of batches) {
-        try {
-          // Process the batch
-          const batchResults = await Promise.all(
-            batch.map(async (email) => {
-              const currentUserEmailAddress = ctx.userEmail;
-              if (!currentUserEmailAddress) {
-                throw new TRPCError({
-                  code: "UNAUTHORIZED",
-                  message: "User email address not found",
-                });
-              }
-              const redis = getRedis();
-              const formattedEmail = `From: ${email.from}\nTo: ${email.to}\nSubject: ${email.subject}\nBody: ${email.bodyText.substring(0, 5000)}`;
-              const cached = await redis.get(`email-categorization:${email.id}`);
-              if (cached) {
-                // Try to parse with EmailCategorySchema
-                const parsed = EmailCategorySchema.safeParse(JSON.parse(cached));
-                if (parsed.success) {
-                  return parsed.data;
-                }
-                // Else, rerun
-              }
-              const result = await categorizeEmail(
-                formattedEmail,
-                currentUserEmailAddress,
-              );
-              if (!result) {
-                throw new TRPCError({
-                  code: "INTERNAL_SERVER_ERROR",
-                  message: "Error categorizing email",
-                });
-              }
-              await redis.set(
-                `email-categorization:${email.id}`,
-                JSON.stringify(result),
-              );
-              return result;
-            })
+      // First, ensure all possible labels exist and get their IDs
+      const possibleLabels = ["Cold Inbound", "Recruiting", "Internal", "Updates", "Promotional"];
+      const labelMap = await getGmailLabels(ctx.gmail);
+      
+      const labelIds = new Map<string, string>();
+      
+      await Promise.all(
+        possibleLabels.map(async (labelName) => {
+          const aiLabelName = "ai:" + labelName.toLowerCase();
+          
+          // Check if label exists in cache
+          const existingLabel = Array.from(labelMap.entries()).find(
+            ([, name]) => name === aiLabelName,
           );
-          
-          results.push(...batchResults.filter(r => r !== null));
-          
-          // Add a small delay between batches
-          if (batches.length > 1) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
+
+          if (existingLabel) {
+            labelIds.set(labelName, existingLabel[0]);
+            return;
           }
-        } catch (error) {
-          await handleGmailError(error);
-        }
-      }
+
+          // If label doesn't exist, create it
+          const createResponse = await ctx.gmail.users.labels.create({
+            userId: "me",
+            requestBody: {
+              name: aiLabelName,
+              labelListVisibility: "labelShow",
+              messageListVisibility: "show",
+            },
+          });
+
+          labelIds.set(labelName, createResponse.data.id!);
+        }),
+      );
+
+      // Invalidate cache since we might have created new labels
+      await getRedis().del("gmail-labels");
+
+      // Filter out already processed emails
+      const emailsToProcess = await Promise.all(
+        input.emails.map(async (email) => {
+          const processed = await redis.get(`email-processed:${email.id}`);
+          return processed ? null : email;
+        })
+      );
+
+      const filteredEmails = emailsToProcess.filter((email): email is NonNullable<typeof email> => email !== null);
+
+      // Now process all unprocessed emails with the known label IDs
+      const results = await Promise.all(
+        filteredEmails.map(async (email) => {
+          const formattedEmail = `From: ${email.from}\nTo: ${email.to}\nSubject: ${email.subject}\nBody: ${email.bodyText.substring(0, 5000)}`;
+          const categories = await categorizeEmail(formattedEmail, currentUserEmailAddress);
+          if (!categories) return null;
+
+          // Collect all applicable label IDs
+          const labelsToAdd: string[] = [];
+          if (categories.is_cold_inbound) {
+            const id = labelIds.get("Cold Inbound");
+            if (id) labelsToAdd.push(id);
+          }
+          if (categories.is_recruiting) {
+            const id = labelIds.get("Recruiting");
+            if (id) labelsToAdd.push(id);
+          }
+          if (categories.is_internal) {
+            const id = labelIds.get("Internal");
+            if (id) labelsToAdd.push(id);
+          }
+          if (categories.is_updates) {
+            const id = labelIds.get("Updates");
+            if (id) labelsToAdd.push(id);
+          }
+          if (categories.is_promotional) {
+            const id = labelIds.get("Promotional");
+            if (id) labelsToAdd.push(id);
+          }
+
+          if (labelsToAdd.length > 0) {
+            // Add all applicable labels in one API call
+            await ctx.gmail.users.messages.modify({
+              userId: "me",
+              id: email.id,
+              requestBody: {
+                addLabelIds: labelsToAdd,
+              },
+            });
+          }
+
+          // Mark email as processed in Redis (keep for 30 days)
+          await redis.set(`email-processed:${email.id}`, "true", "EX", 60 * 60 * 24 * 30);
+
+          return {
+            emailId: email.id,
+            categories,
+            addedLabels: labelsToAdd,
+          };
+        }),
+      );
 
       return {
         success: true,
         results: results.filter((r): r is NonNullable<typeof r> => r !== null),
-        skippedCount,
+        skippedCount: input.emails.length - filteredEmails.length,
       };
     }),
 });
