@@ -21,7 +21,7 @@ export function EmailCard({ email }: EmailCardProps) {
   const formattedDate = new Date(email.date).toLocaleString();
   const [isExpanded, setIsExpanded] = useState(false);
   const [shouldCategorize, setShouldCategorize] = useState(false);
-
+  const {mutate: markAsArchived, isPending, isSuccess} = trpc.gmail.markAsArchived.useMutation(undefined);
   const { data: categories, isLoading, error } = trpc.gmail.categorizeEmail.useQuery(
     { email },
     { 
@@ -75,6 +75,11 @@ export function EmailCard({ email }: EmailCardProps) {
             ) : 'Categorize Email'}
           </button>
 
+          <button 
+            className="mt-2 px-3 py-1 text-sm rounded-md bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 ml-2"
+            onClick={() => markAsArchived({emailId: email.id})} disabled={isPending || isSuccess}>
+            {isPending ? 'Marking as Archived...' : isSuccess ? 'Archived' : 'Mark as Archived'}
+          </button>
           {error && (
             <div className="mt-2 p-2 text-sm text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400 rounded-md">
               Error: {error.message || 'Failed to categorize email'}

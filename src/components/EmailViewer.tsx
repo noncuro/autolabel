@@ -27,19 +27,20 @@ export default function EmailViewer() {
       retry: false,
     },
   );
-  // const utils = trpc.useUtils();
+  const utils = trpc.useUtils();
 
   const bulkCategorize = trpc.gmail.bulkCategorizeAndLabel.useMutation({
     onSuccess: (data) => {
       // Refresh the email list to show new labels
       // utils.gmail.getRecentEmails.invalidate();
       if (data.skippedCount > 0) {
-        console.log(`Categorization complete!\nProcessed: ${data.results.length} emails\nSkipped: ${data.skippedCount} already processed emails`);
+        console.log(
+          `Categorization complete!\nProcessed: ${data.results.length} emails\nSkipped: ${data.skippedCount} already processed emails`,
+        );
       }
     },
   });
 
-  
   const handleDownload = () => {
     if (!data) return;
     const allEmails = data.pages.flatMap((page) => page.items);
@@ -78,6 +79,30 @@ export default function EmailViewer() {
     );
   }
 
+  const loadAndRunCategorization = async () => {
+    if (!data) return;
+    let page = 0;
+    let cursor: string | undefined | null = null;
+    while (cursor !== undefined) {
+      // Load a page
+      const d = await utils.gmail.getRecentEmails.fetchInfinite({
+        limit: 20,
+        cursor: cursor ?? undefined,
+      });
+      console.log(
+        `Loaded 20 more. Total emails: ${d.pages.reduce((acc, page) => acc + page.items.length, 0)}`,
+      );
+      // Run categorization
+      const emails = d.pages.flatMap((page) => page.items);
+      console.log(`Categorizing ${emails.length} emails`);
+      await bulkCategorize.mutateAsync({ emails });
+      console.log(`Categorization complete for page ${page + 1}`);
+      cursor = d.pages[d.pages.length - 1]?.nextCursor;
+      console.log(`Cursor: ${cursor}`);
+      page++;
+    }
+  };
+
   return (
     <div className="max-w-2xl mx-auto space-y-4">
       <div className="flex justify-between items-center p-4 bg-gray-50 rounded-lg">
@@ -89,7 +114,11 @@ export default function EmailViewer() {
             Download Emails
           </button>
           <button
-            onClick={() => bulkCategorize.mutate({emails: data?.pages.flatMap((page) => page.items)})}
+            onClick={() =>
+              bulkCategorize.mutate({
+                emails: data?.pages.flatMap((page) => page.items),
+              })
+            }
             disabled={bulkCategorize.isPending || !data?.pages[0].items.length}
             className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:bg-purple-300 text-sm"
           >
@@ -104,15 +133,26 @@ export default function EmailViewer() {
               {isFetching ? "Loading..." : "Load 100 More"}
             </button>
           )}
+          <button
+            onClick={() => {
+              loadAndRunCategorization();
+            }}
+            className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 disabled:bg-red-300 text-sm"
+          >
+            Incremental
+          </button>
         </div>
         <div className="text-sm text-gray-600">
           {data.pages.reduce((acc, page) => acc + page.items.length, 0)} emails
           loaded
         </div>
       </div>
-      {data.pages.map((page) =>
-        page.items.map((email) => <EmailCard key={email.id} email={email} />),
-      )}
+      {data.pages
+        .flatMap((page) => page.items)
+        .sort((a, b) => a.from.localeCompare(b.from))
+        .map((email) => (
+          <EmailCard key={email.id} email={email} />
+        ))}
 
       <div ref={ref} className="h-10 flex items-center justify-center">
         {isFetchingNextPage && (

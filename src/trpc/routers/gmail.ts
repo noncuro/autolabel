@@ -415,4 +415,25 @@ export const gmailRouter = router({
         skippedCount: input.emails.length - filteredEmails.length,
       };
     }),
+  markAsArchived: publicProcedure
+    .input(
+      z.object({
+        emailId: z.string(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      if (!ctx.gmail) {
+        throw new TRPCError({ code: "UNAUTHORIZED" });
+      }
+
+      await ctx.gmail.users.messages.modify({
+        userId: "me",
+        id: input.emailId,
+        requestBody: {
+          removeLabelIds: ["INBOX"],
+        },
+      });
+
+      return { success: true };
+    }),
 });
