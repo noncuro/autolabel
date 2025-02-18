@@ -9,20 +9,36 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.64.2",
+    "@trpc/client": "11.0.0-rc.700",
+    "@trpc/react-query": "11.0.0-rc.700",
+    "@trpc/server": "11.0.0-rc.700",
+    "client-only": "^0.0.1",
     "googleapis": "^144.0.0",
+    "ioredis": "^5.4.2",
     "next": "15.1.5",
     "next-auth": "^4.24.11",
+    "openai": "^4.79.1",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-error-boundary": "^5.0.0",
+    "react-intersection-observer": "^9.15.0",
+    "server-only": "^0.0.1",
+    "superjson": "^2.2.2",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@tailwindcss/typography": "^0.5.16",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "autoprefixer": "^10.4.20",
     "eslint": "^9",
     "eslint-config-next": "15.1.5",
+    "googleapis-common": "^7.2.0",
     "postcss": "^8",
+    "prettier": "3.4.2",
     "tailwindcss": "^3.4.1",
     "typescript": "^5"
   }

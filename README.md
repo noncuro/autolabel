@@ -1,36 +1,23 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Email Sorting System
 
-## Getting Started
+Super simple email sorting system that uses OpenAI to categorize emails into labels: "To Reply", "To Read", "To Archive". WIP so it's written for a single user.
 
-First, run the development server:
+## Features
+- Automatically categorizes emails using OpenAI
+- Integrates with Gmail via Gmail API
+- Provides a minimal web interface to manage categorized emails
+- Real-time email processing and categorization
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Configuration
+1. Set up Google OAuth 2.0 credentials in Google Cloud Console
+2. Enable Gmail API in your Google Cloud Project
+3. Configure Redis - e.g. with Upstash
+4. Set the `CRON_SECRET` to anything.
+5. Set the `ENCRYPTION_KEY` with `openssl rand -hex 32`
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Usage
+1. Run `npm run dev`
+2. Authenticate with Google via the frontend
+3. Press "save creds to Redis"
+4. Set up a cron job to run `http://localhost:3000/api/cron/categorize` with the `CRON_SECRET` as the token
+5. Profit.
