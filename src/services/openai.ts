@@ -30,10 +30,25 @@ To read: the email should be read by the user, but probably doesn't need a reply
 To reply: the email should be replied to by the user. For example, an important email send by a friend directly to the user, an email from a customer, client, investor, or coworker.
 To archive: the email will probably not be read by the user, and will likely be archived. For example, a promotional email, a notification from a service provider, an advertisement, a cold inbound email. 
 
-Cold inbound emails should almost always be put in "To archive".
-Login codes should be put in "To archive".
-An important email sent to a teammate CC'ing the user should usually be put in "To read".
-Notifications from services should almost always be put in "To archive".
+Examples:
+Cold inbound emails -> "To archive".
+Login codes -> "To archive".
+"Your order is on its way!" -> "To archive".
+"Build failed" -> "To read".
+"We're making some changes to your terms of service" -> "To archive".
+"Spot email scams with these tips" -> "To archive".
+"Are we meeting up next week?" -> "To reply".
+"It was so great meeting you last week! Should we catch up again soon?" -> "To reply".
+"I'm running late, but I'll be there in 10 minutes" -> "To reply".
+"Hi all- remember to always sign out of the computer when you're done using it" -> "To read".
+Important email sent to a teammate CC'ing the user -> "To read".
+Important email sent by a teammate to someone else -> "To read".
+"Your team is low on credits" -> "To archive".
+"App version 1.0.1 is now available" -> "To archive".
+"You're invited: How company valuations work" -> "To archive".
+"Remember to sign the lease by the 15th, or you'll be charged a late fee" -> "To reply".
+"FYI - check this out" -> "To read".
+"Here's your booking summary" -> "To read".
 
 
 You will be given an email and you will need to determine which category it belongs to.
