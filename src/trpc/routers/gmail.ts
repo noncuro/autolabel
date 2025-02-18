@@ -1,13 +1,22 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { publicProcedure, router } from "../trpc";
-import { getRedis, saveGmailCredentials, getGmailCredentials, getAllGmailCredentials } from "@/services/redis";
+import {
+  getRedis,
+  saveGmailCredentials,
+  getGmailCredentials,
+  getAllGmailCredentials,
+} from "@/services/redis";
 import { categorizeEmail, EmailCategorySchema } from "@/services/openai";
 import { gmail_v1 } from "googleapis";
 import { google } from "googleapis";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
-import { authenticateGmail, processUserEmails, processBatchEmails } from "@/services/gmail";
+import {
+  authenticateGmail,
+  processUserEmails,
+  processBatchEmails,
+} from "@/services/gmail";
 
 const EmailSchema = z.object({
   id: z.string(),
@@ -613,62 +622,5 @@ export const gmailRouter = router({
     });
 
     return { success: true };
-  }),
-  testGmailApiWithRedis: publicProcedure.mutation(async ({ ctx }) => {
-    if (!ctx.userEmail) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: "No user email available",
-      });
-    }
-
-    const auth = await authenticateGmail(ctx.userEmail);
-    if (!auth) {
-      throw new TRPCError({
-        code: "NOT_FOUND",
-        message: "No credentials found in Redis or failed to authenticate",
-      });
-    }
-
-    const response = await auth.gmail.users.labels.list({ userId: "me" });
-
-    return {
-      success: true,
-      labelCount: response.data.labels?.length ?? 0,
-    };
-  }),
-  backgroundCategorization: publicProcedure
-    .input(
-      z.object({
-        secretKey: z.string(),
-      })
-    )
-    .mutation(async ({ input }) => {
-      if (input.secretKey !== process.env.BACKGROUND_TASK_SECRET) {
-        throw new TRPCError({
-          code: "UNAUTHORIZED",
-          message: "Invalid secret key",
-        });
-      }
-
-      return processBatchEmails();
-    }),
-  categorizeCurrentUserEmails: publicProcedure.mutation(async ({ ctx }) => {
-    if (!ctx.userEmail) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: "No user email available",
-      });
-    }
-
-    const result = await processUserEmails(ctx.userEmail);
-    if (!result.success) {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: result.error || "Failed to process emails",
-      });
-    }
-
-    return result;
   }),
 });
