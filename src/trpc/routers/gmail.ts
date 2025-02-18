@@ -4,6 +4,7 @@ import { publicProcedure, router } from "../trpc";
 import { getRedis } from "@/services/redis";
 import { categorizeEmail, EmailCategorySchema } from "@/services/openai";
 import { gmail_v1 } from "googleapis";
+import { google } from "googleapis";
 
 const EmailSchema = z.object({
   id: z.string(),
@@ -57,6 +58,58 @@ async function getGmailLabels(
   return labelMap;
 }
 
+const formatEmailFromMessage = (
+  message: gmail_v1.Schema$Message,
+  labelMap: Map<string, string>,
+) => {
+  const headers = message.payload?.headers;
+  const labels =
+    message.labelIds?.map((labelId) => ({
+      id: labelId,
+      name: labelMap.get(labelId) || labelId,
+    })) || [];
+
+  const payload = message.payload;
+  const body = payload?.parts?.find((part) => part.mimeType === "text/plain");
+
+  // Replace invalid base64url characters and add padding if needed
+  const base64Data = (body?.body?.data || "")
+    .replace(/-/g, "+")
+    .replace(/_/g, "/")
+    .padEnd(
+      (body?.body?.data || "").length +
+        ((4 - ((body?.body?.data || "").length % 4)) % 4),
+      "=",
+    );
+
+  // Use TextDecoder for proper UTF-8 decoding
+  const bodyText = new TextDecoder().decode(
+    Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0)),
+  );
+
+  // Remove any URLs
+  const bodyTextWithoutUrls = bodyText.replace(
+    /(https?:\/\/[^\s]+)/g,
+    "URL OMITTED",
+  );
+
+  const bodyToSend =
+    bodyTextWithoutUrls.length > 10000
+      ? message.snippet + "..."
+      : bodyTextWithoutUrls;
+
+  return {
+    id: message.id!,
+    subject: headers?.find((h) => h.name === "Subject")?.value || "No Subject",
+    from: headers?.find((h) => h.name === "From")?.value || "",
+    to: headers?.find((h) => h.name === "To")?.value || "",
+    date: headers?.find((h) => h.name === "Date")?.value || "",
+    snippet: message.snippet || "",
+    bodyText: bodyToSend,
+    labels,
+  };
+};
+
 export const gmailRouter = router({
   getRecentEmails: publicProcedure
     .input(
@@ -87,10 +140,7 @@ export const gmailRouter = router({
         });
 
         if (!threadResponse.data.threads?.length) {
-          return {
-            items: [],
-            nextCursor: undefined,
-          };
+          return { items: [], nextCursor: undefined };
         }
 
         const threadsWithMessages = await Promise.all(
@@ -99,61 +149,27 @@ export const gmailRouter = router({
               userId: "me",
               id: thread.id!,
             });
-            const firstMessage = threadDetails.data.messages?.[0];
-            if (!firstMessage) return null;
 
-            const headers = firstMessage.payload?.headers;
-            const labels =
-              firstMessage.labelIds?.map((labelId) => ({
-                id: labelId,
-                name: labelMap.get(labelId) || labelId,
-              })) || [];
+            const messages = threadDetails.data.messages;
+            if (!messages?.length) return null;
 
-            const payload = firstMessage.payload;
-            const body = payload?.parts?.find(
-              (part) => part.mimeType === "text/plain",
-            );
-            // Replace invalid base64url characters and add padding if needed
-            const base64Data = (body?.body?.data || "")
-              .replace(/-/g, "+")
-              .replace(/_/g, "/")
-              .padEnd(
-                (body?.body?.data || "").length +
-                  ((4 - ((body?.body?.data || "").length % 4)) % 4),
-                "=",
-              );
-            // Use TextDecoder for proper UTF-8 decoding
-            const bodyText = new TextDecoder().decode(
-              Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0)),
-            );
+            // Format the most recent message as the main email
+            const mainEmail = formatEmailFromMessage(messages[messages.length - 1], labelMap);
 
-            // Remove any URLs
-            const bodyTextWithoutUrls = bodyText.replace(
-              /(https?:\/\/[^\s]+)/g,
-              "URL OMITTED",
-            );
+            // Add previous messages in the thread to the body
+            if (messages.length > 1) {
+              const previousMessages = messages
+                .slice(0, messages.length - 1)
+                .map((msg) => {
+                  const formatted = formatEmailFromMessage(msg, labelMap);
+                  return `\n\n--- Previous message from ${formatted.from} on ${formatted.date} ---\n${formatted.bodyText.substring(0, 1000)}...`;
+                })
+                .join("");
 
-            const bodyToSend =
-              bodyTextWithoutUrls.length > 10000
-                ? firstMessage.snippet + "..."
-                : bodyTextWithoutUrls;
-
-            if (!firstMessage.id) {
-              return null;
+              mainEmail.bodyText = `${mainEmail.bodyText}${previousMessages}`;
             }
 
-            return {
-              id: firstMessage.id,
-              subject:
-                headers?.find((h) => h.name === "Subject")?.value ||
-                "No Subject",
-              from: headers?.find((h) => h.name === "From")?.value || "",
-              to: headers?.find((h) => h.name === "To")?.value || "",
-              date: headers?.find((h) => h.name === "Date")?.value || "",
-              snippet: firstMessage.snippet || "",
-              bodyText: bodyToSend,
-              labels,
-            };
+            return mainEmail;
           }),
         );
 
@@ -241,7 +257,7 @@ export const gmailRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const labelName = "ai:" + input.labelName.toLowerCase();
+      const labelName = input.labelName;
       if (!ctx.gmail) {
         throw new TRPCError({ code: "UNAUTHORIZED" });
       }
@@ -254,33 +270,27 @@ export const gmailRouter = router({
           ([, name]) => name === labelName,
         );
 
-        if (existingLabel) {
-          return { success: true, labelId: existingLabel[0] };
+        if (!existingLabel) {
+          return {
+            success: false,
+            reason: "Label does not exist",
+          };
         }
-
-        // If label doesn't exist, create it and update cache
-        const createResponse = await ctx.gmail.users.labels.create({
-          userId: "me",
-          requestBody: {
-            name: labelName,
-            labelListVisibility: "labelShow",
-            messageListVisibility: "show",
-          },
-        });
-
-        // Invalidate cache to force refresh on next request
-        await getRedis().del("gmail-labels");
-
         // Add the label to the email
         await ctx.gmail.users.messages.modify({
           userId: "me",
           id: input.emailId,
           requestBody: {
-            addLabelIds: [createResponse.data.id!],
+            addLabelIds: [existingLabel[0]],
           },
         });
 
-        return { success: true };
+        return {
+          success: true,
+          labelId: existingLabel[0],
+          labelName: labelName,
+          exists: true,
+        };
       } catch (error) {
         console.error("Error adding label:", error);
         throw new TRPCError({
@@ -313,16 +323,15 @@ export const gmailRouter = router({
       // First, ensure all possible labels exist and get their IDs
       const possibleLabels = ["To Read", "To Reply", "To Archive"];
       const labelMap = await getGmailLabels(ctx.gmail);
-      
+
       const labelIds = new Map<string, string>();
-      
+
       await Promise.all(
         possibleLabels.map(async (labelName) => {
-          const aiLabelName = "ai:" + labelName.toLowerCase();
-          
+
           // Check if label exists in cache
           const existingLabel = Array.from(labelMap.entries()).find(
-            ([, name]) => name === aiLabelName,
+            ([, name]) => name === labelName,
           );
 
           if (existingLabel) {
@@ -334,7 +343,7 @@ export const gmailRouter = router({
           const createResponse = await ctx.gmail.users.labels.create({
             userId: "me",
             requestBody: {
-              name: aiLabelName,
+              name: labelName,
               labelListVisibility: "labelShow",
               messageListVisibility: "show",
             },
@@ -352,39 +361,36 @@ export const gmailRouter = router({
         input.emails.map(async (email) => {
           const processed = await redis.get(`email-processed:${email.id}`);
           return processed ? null : email;
-        })
+        }),
       );
 
-      const filteredEmails = emailsToProcess.filter((email): email is NonNullable<typeof email> => email !== null);
+      const filteredEmails = emailsToProcess.filter(
+        (email): email is NonNullable<typeof email> => email !== null,
+      );
 
       // Now process all unprocessed emails with the known label IDs
       const results = await Promise.all(
         filteredEmails.map(async (email) => {
           const formattedEmail = `From: ${email.from}\nTo: ${email.to}\nSubject: ${email.subject}\nBody: ${email.bodyText.substring(0, 5000)}`;
-          const categories = await categorizeEmail(formattedEmail, currentUserEmailAddress);
+          const categories = await categorizeEmail(
+            formattedEmail,
+            currentUserEmailAddress,
+          );
           if (!categories) return null;
 
           // Collect all applicable label IDs
           const labelsToAdd: string[] = [];
-          if (categories.is_cold_inbound) {
-            const id = labelIds.get("Cold Inbound");
+          if (categories.action === "to read") {
+            const id = labelIds.get("To Read");
             if (id) labelsToAdd.push(id);
-          }
-          if (categories.is_recruiting) {
-            const id = labelIds.get("Recruiting");
+          } else if (categories.action === "to reply") {
+            const id = labelIds.get("To Reply");
             if (id) labelsToAdd.push(id);
-          }
-          if (categories.is_internal) {
-            const id = labelIds.get("Internal");
+          } else if (categories.action === "to archive") {
+            const id = labelIds.get("To Archive");
             if (id) labelsToAdd.push(id);
-          }
-          if (categories.is_updates) {
-            const id = labelIds.get("Updates");
-            if (id) labelsToAdd.push(id);
-          }
-          if (categories.is_promotional) {
-            const id = labelIds.get("Promotional");
-            if (id) labelsToAdd.push(id);
+          } else {
+            console.error("Unknown action:", categories.action);
           }
 
           if (labelsToAdd.length > 0) {
@@ -399,7 +405,12 @@ export const gmailRouter = router({
           }
 
           // Mark email as processed in Redis (keep for 30 days)
-          await redis.set(`email-processed:${email.id}`, "true", "EX", 60 * 60 * 24 * 30);
+          await redis.set(
+            `email-processed:${email.id}`,
+            "true",
+            "EX",
+            60 * 60 * 24 * 30,
+          );
 
           return {
             emailId: email.id,
@@ -489,7 +500,7 @@ export const gmailRouter = router({
             const body = payload?.parts?.find(
               (part) => part.mimeType === "text/plain",
             );
-            
+
             const base64Data = (body?.body?.data || "")
               .replace(/-/g, "+")
               .replace(/_/g, "/")
@@ -498,7 +509,7 @@ export const gmailRouter = router({
                   ((4 - ((body?.body?.data || "").length % 4)) % 4),
                 "=",
               );
-            
+
             const bodyText = new TextDecoder().decode(
               Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0)),
             );
@@ -572,5 +583,99 @@ export const gmailRouter = router({
           message: "Error archiving emails",
         });
       }
+    }),
+  saveCredentialsToRedis: publicProcedure
+    .mutation(async ({ ctx }) => {
+      if (!ctx.session?.accessToken || !ctx.session?.refreshToken) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "No credentials available",
+        });
+      }
+
+      const redis = getRedis();
+      const credentials = {
+        accessToken: ctx.session.accessToken,
+        refreshToken: ctx.session.refreshToken,
+        expiresAt: ctx.session.expiresAt,
+      };
+
+      await redis.set(
+        `gmail-credentials:${ctx.userEmail}`,
+        JSON.stringify(credentials),
+        "EX",
+        60 * 60 * 24 * 30 // 30 days
+      );
+
+      return { success: true };
+    }),
+  testGmailApiWithRedis: publicProcedure
+    .mutation(async ({ ctx }) => {
+      if (!ctx.userEmail) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "No user email available",
+        });
+      }
+
+      const redis = getRedis();
+      const credentialsStr = await redis.get(`gmail-credentials:${ctx.userEmail}`);
+      
+      if (!credentialsStr) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "No credentials found in Redis",
+        });
+      }
+
+      const credentials = JSON.parse(credentialsStr);
+      const oauth2Client = new google.auth.OAuth2(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET,
+        process.env.NEXTAUTH_URL
+      );
+
+      oauth2Client.setCredentials({
+        access_token: credentials.accessToken,
+        refresh_token: credentials.refreshToken,
+        expiry_date: credentials.expiresAt ? credentials.expiresAt * 1000 : undefined,
+      });
+
+      // If token is expired, refresh it
+      if (credentials.expiresAt && Date.now() > credentials.expiresAt * 1000) {
+        try {
+          const { credentials: newCredentials } = await oauth2Client.refreshAccessToken();
+          
+          // Save new credentials to Redis
+          const updatedCredentials = {
+            accessToken: newCredentials.access_token,
+            refreshToken: credentials.refreshToken, // Keep existing refresh token
+            expiresAt: Math.floor((Date.now() + (newCredentials.expiry_date || 3600 * 1000)) / 1000),
+          };
+
+          await redis.set(
+            `gmail-credentials:${ctx.userEmail}`,
+            JSON.stringify(updatedCredentials),
+            "EX",
+            60 * 60 * 24 * 30 // 30 days
+          );
+
+          oauth2Client.setCredentials(newCredentials);
+        } catch (error) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Failed to refresh token",
+          });
+        }
+      }
+
+      // Test the API by trying to list labels
+      const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+      const response = await gmail.users.labels.list({ userId: "me" });
+
+      return {
+        success: true,
+        labelCount: response.data.labels?.length ?? 0,
+      };
     }),
 });

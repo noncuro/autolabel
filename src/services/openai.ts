@@ -8,12 +8,12 @@ export const openai = new OpenAI({
 });
 
 export const EmailCategorySchema = z.object({
+  isColdInbound: z.boolean(),
+  isUpdate: z.boolean(),
+  isPromotional: z.boolean(),
+  isAddressedToUser: z.boolean(),
   explanation: z.string(),
-  is_cold_inbound: z.boolean(),
-  is_recruiting: z.boolean(),
-  is_internal: z.boolean(),
-  is_updates: z.boolean(),
-  is_promotional: z.boolean(),
+  action: z.enum(["to read", "to reply", "to archive"]),
 });
 
 // Type can be inferred from the schema
@@ -24,14 +24,21 @@ You are a helpful assistant that categorizes emails.
 `;
 
 const userPrompt = `
-Please categorize with a JSON response whether the email is:
-- cold inbound: the email is from someone we don't know, for example someone looking for a job or selling their services.
-- recruiting: the email is related to recruiting, either from a recruiter or a candidate.
-- internal: the email is from someone you know and is not a recruiter
-- updates: the email is from a vendor or service provider providing an automated update or notification
-- promotional: the email is from a vendor or service provider promoting a product or service
+Please categorize with a JSON response which inbox action the email should be: "to read", "to reply", or "to archive".
 
-You will be given an email and you will need to determine which category it belongs to. Note that an email can belong to multiple categories.
+To read: the email should be read by the user, but probably doesn't need a reply. For example, a newsletter, a product update, a blog post, or an email sent to a teammate.
+To reply: the email should be replied to by the user. For example, an important email send by a friend directly to the user, an email from a customer, client, investor, or coworker.
+To archive: the email will probably not be read by the user, and will likely be archived. For example, a promotional email, a notification from a service provider, an advertisement, a cold inbound email. 
+
+Cold inbound emails should almost always be put in "To archive".
+Login codes should be put in "To archive".
+An important email sent to a teammate CC'ing the user should usually be put in "To read".
+Notifications from services should almost always be put in "To archive".
+
+
+You will be given an email and you will need to determine which category it belongs to.
+
+In the explanation field, mention if the email is a cold inbound email, a product update, a newsletter, a blog post, an advertisement, a notification from a service provider, or similar categories. Mention all relevant tags this email could recieve.
 
 <current_user_email>
 {user_email}

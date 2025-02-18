@@ -90,34 +90,22 @@ export function EmailCard({ email }: EmailCardProps) {
             <div className="mt-2 p-2 bg-gray-50 dark:bg-gray-900/50 rounded-md">
               <p className="font-medium">Categories:</p>
               <ul className="list-disc list-inside mt-1">
-                {categories.is_cold_inbound && (
+                {categories.action === "to read" && (
                   <CategoryLabelButton
                     emailId={email.id}
-                    labelName="Cold Inbound"
+                    labelName="To Read"
                   />
                 )}
-                {categories.is_recruiting && (
+                {categories.action === "to reply" && (
                   <CategoryLabelButton
                     emailId={email.id}
-                    labelName="Recruiting"
+                    labelName="To Reply"
                   />
                 )}
-                {categories.is_internal && (
+                {categories.action === "to archive" && (
                   <CategoryLabelButton
                     emailId={email.id}
-                    labelName="Internal"
-                  />
-                )}
-                {categories.is_updates && (
-                  <CategoryLabelButton
-                    emailId={email.id}
-                    labelName="Updates"
-                  />
-                )}
-                {categories.is_promotional && (
-                  <CategoryLabelButton
-                    emailId={email.id}
-                    labelName="Promotional"
+                    labelName="To Archive"
                   />
                 )}
               </ul>

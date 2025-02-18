@@ -43,6 +43,7 @@ export function TRPCProvider(
         httpBatchLink({
           transformer: superjson,
           url: getUrl(),
+          methodOverride: "POST",
         }),
       ],
     }),

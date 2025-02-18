@@ -19,7 +19,7 @@ export default function EmailViewer() {
     isFetching,
   } = trpc.gmail.getRecentEmails.useInfiniteQuery(
     {
-      limit: 50,
+      limit: 20,
     },
     {
       enabled: !!session,
