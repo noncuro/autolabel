@@ -1,10 +1,13 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { publicProcedure, router } from "../trpc";
-import { getRedis } from "@/services/redis";
+import { getRedis, saveGmailCredentials, getGmailCredentials, getAllGmailCredentials } from "@/services/redis";
 import { categorizeEmail, EmailCategorySchema } from "@/services/openai";
 import { gmail_v1 } from "googleapis";
 import { google } from "googleapis";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import { authenticateGmail, processUserEmails, processBatchEmails } from "@/services/gmail";
 
 const EmailSchema = z.object({
   id: z.string(),
@@ -154,7 +157,10 @@ export const gmailRouter = router({
             if (!messages?.length) return null;
 
             // Format the most recent message as the main email
-            const mainEmail = formatEmailFromMessage(messages[messages.length - 1], labelMap);
+            const mainEmail = formatEmailFromMessage(
+              messages[messages.length - 1],
+              labelMap,
+            );
 
             // Add previous messages in the thread to the body
             if (messages.length > 1) {
@@ -328,7 +334,6 @@ export const gmailRouter = router({
 
       await Promise.all(
         possibleLabels.map(async (labelName) => {
-
           // Check if label exists in cache
           const existingLabel = Array.from(labelMap.entries()).find(
             ([, name]) => name === labelName,
@@ -584,98 +589,86 @@ export const gmailRouter = router({
         });
       }
     }),
-  saveCredentialsToRedis: publicProcedure
-    .mutation(async ({ ctx }) => {
-      if (!ctx.session?.accessToken || !ctx.session?.refreshToken) {
-        throw new TRPCError({
-          code: "UNAUTHORIZED",
-          message: "No credentials available",
-        });
-      }
+  saveCredentialsToRedis: publicProcedure.mutation(async () => {
+    const session = await getServerSession(authOptions);
 
-      const redis = getRedis();
-      const credentials = {
-        accessToken: ctx.session.accessToken,
-        refreshToken: ctx.session.refreshToken,
-        expiresAt: ctx.session.expiresAt,
-      };
-
-      await redis.set(
-        `gmail-credentials:${ctx.userEmail}`,
-        JSON.stringify(credentials),
-        "EX",
-        60 * 60 * 24 * 30 // 30 days
-      );
-
-      return { success: true };
-    }),
-  testGmailApiWithRedis: publicProcedure
-    .mutation(async ({ ctx }) => {
-      if (!ctx.userEmail) {
-        throw new TRPCError({
-          code: "UNAUTHORIZED",
-          message: "No user email available",
-        });
-      }
-
-      const redis = getRedis();
-      const credentialsStr = await redis.get(`gmail-credentials:${ctx.userEmail}`);
-      
-      if (!credentialsStr) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "No credentials found in Redis",
-        });
-      }
-
-      const credentials = JSON.parse(credentialsStr);
-      const oauth2Client = new google.auth.OAuth2(
-        process.env.GOOGLE_CLIENT_ID,
-        process.env.GOOGLE_CLIENT_SECRET,
-        process.env.NEXTAUTH_URL
-      );
-
-      oauth2Client.setCredentials({
-        access_token: credentials.accessToken,
-        refresh_token: credentials.refreshToken,
-        expiry_date: credentials.expiresAt ? credentials.expiresAt * 1000 : undefined,
+    if (!session?.accessToken || !session?.refreshToken) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "No credentials available",
       });
+    }
 
-      // If token is expired, refresh it
-      if (credentials.expiresAt && Date.now() > credentials.expiresAt * 1000) {
-        try {
-          const { credentials: newCredentials } = await oauth2Client.refreshAccessToken();
-          
-          // Save new credentials to Redis
-          const updatedCredentials = {
-            accessToken: newCredentials.access_token,
-            refreshToken: credentials.refreshToken, // Keep existing refresh token
-            expiresAt: Math.floor((Date.now() + (newCredentials.expiry_date || 3600 * 1000)) / 1000),
-          };
+    if (!session.user?.email) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "No user email available",
+      });
+    }
 
-          await redis.set(
-            `gmail-credentials:${ctx.userEmail}`,
-            JSON.stringify(updatedCredentials),
-            "EX",
-            60 * 60 * 24 * 30 // 30 days
-          );
+    await saveGmailCredentials(session.user.email, {
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+      expiresAt: session.expiresAt,
+    });
 
-          oauth2Client.setCredentials(newCredentials);
-        } catch (error) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: "Failed to refresh token",
-          });
-        }
+    return { success: true };
+  }),
+  testGmailApiWithRedis: publicProcedure.mutation(async ({ ctx }) => {
+    if (!ctx.userEmail) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "No user email available",
+      });
+    }
+
+    const auth = await authenticateGmail(ctx.userEmail);
+    if (!auth) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "No credentials found in Redis or failed to authenticate",
+      });
+    }
+
+    const response = await auth.gmail.users.labels.list({ userId: "me" });
+
+    return {
+      success: true,
+      labelCount: response.data.labels?.length ?? 0,
+    };
+  }),
+  backgroundCategorization: publicProcedure
+    .input(
+      z.object({
+        secretKey: z.string(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      if (input.secretKey !== process.env.BACKGROUND_TASK_SECRET) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "Invalid secret key",
+        });
       }
 
-      // Test the API by trying to list labels
-      const gmail = google.gmail({ version: "v1", auth: oauth2Client });
-      const response = await gmail.users.labels.list({ userId: "me" });
-
-      return {
-        success: true,
-        labelCount: response.data.labels?.length ?? 0,
-      };
+      return processBatchEmails();
     }),
+  categorizeCurrentUserEmails: publicProcedure.mutation(async ({ ctx }) => {
+    if (!ctx.userEmail) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "No user email available",
+      });
+    }
+
+    const result = await processUserEmails(ctx.userEmail);
+    if (!result.success) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: result.error || "Failed to process emails",
+      });
+    }
+
+    return result;
+  }),
 });
