@@ -196,6 +196,10 @@ export interface EmailMessage {
 
 export const processUserEmails = async (
   emailAddress: string,
+  options: {
+    processAll?: boolean;
+    batchSize?: number;
+  } = {}
 ): Promise<{
   email: string;
   success: boolean;
@@ -214,148 +218,156 @@ export const processUserEmails = async (
     }
 
     const { gmail } = auth;
+    let processedCount = 0;
+    let skippedCount = 0;
+    let pageToken: string | undefined;
 
-    // Get recent emails
-    const threadResponse = await gmail.users.threads.list({
-      userId: "me",
-      maxResults: 20,
-      q: "in:inbox",
-    });
+    do {
+      // Get emails in batches
+      const threadResponse = await gmail.users.threads.list({
+        userId: "me",
+        maxResults: options.batchSize || 20,
+        q: "in:inbox",
+        pageToken,
+      });
 
-    if (!threadResponse.data.threads?.length) {
-      return {
-        email: emailAddress,
-        success: true,
-        processedCount: 0,
-        skippedCount: 0,
-      };
-    }
+      if (!threadResponse.data.threads?.length) {
+        break;
+      }
 
-    // Get full thread details
-    const emails = await Promise.all(
-      threadResponse.data.threads.map(async (thread) => {
-        const threadDetails = await gmail.users.threads.get({
-          userId: "me",
-          id: thread.id!,
-        });
-
-        const message =
-          threadDetails.data.messages?.[threadDetails.data.messages.length - 1];
-        if (!message || !message.payload?.headers) return null;
-
-        const headers = message.payload.headers;
-        const body = message.payload.parts?.find(
-          (part) => part.mimeType === "text/plain",
-        );
-        const base64Data = (body?.body?.data || "")
-          .replace(/-/g, "+")
-          .replace(/_/g, "/")
-          .padEnd(
-            (body?.body?.data || "").length +
-              ((4 - ((body?.body?.data || "").length % 4)) % 4),
-            "=",
-          );
-
-        const bodyText = new TextDecoder()
-          .decode(Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0)))
-          .replace(/(https?:\/\/[^\s]+)/g, "URL OMITTED");
-
-        return {
-          id: message.id!,
-          subject:
-            headers.find((h) => h.name === "Subject")?.value || "No Subject",
-          from: headers.find((h) => h.name === "From")?.value || "",
-          to: headers.find((h) => h.name === "To")?.value || "",
-          date: headers.find((h) => h.name === "Date")?.value || "",
-          snippet: message.snippet || "",
-          bodyText:
-            bodyText.length > 10000 ? message.snippet + "..." : bodyText,
-          labels: message.labelIds,
-        };
-      }),
-    );
-
-    const validEmails = emails.filter(
-      (e): e is NonNullable<typeof e> => e !== null,
-    );
-
-    // Ensure labels exist
-    const labelIds = await ensureLabelsExist(gmail, [
-      "To Read",
-      "To Reply",
-      "To Archive",
-    ]);
-
-    // Process each email
-    const results = await Promise.all(
-      validEmails.map(async (email) => {
-        // Check if email was already processed
-        if (await isEmailProcessed(emailAddress, email.id)) {
-          return null;
-        }
-
-        const formattedEmail = `From: ${email.from}\nTo: ${email.to}\nSubject: ${email.subject}\nBody: ${email.bodyText.substring(0, 5000)}`;
-        const categories = await categorizeEmail(formattedEmail, email.to);
-
-        if (!categories) return null;
-
-        const labelsToAdd: string[] = [];
-        if (categories.action === "to read") {
-          const id = labelIds.get("To Read");
-          if (id) labelsToAdd.push(id);
-        } else if (categories.action === "to reply") {
-          const id = labelIds.get("To Reply");
-          if (id) labelsToAdd.push(id);
-        } else if (categories.action === "to archive") {
-          const id = labelIds.get("To Archive");
-          if (id) labelsToAdd.push(id);
-        }
-
-        if (labelsToAdd.length > 0) {
-          await gmail.users.messages.modify({
+      // Get full thread details
+      const emails = await Promise.all(
+        threadResponse.data.threads.map(async (thread) => {
+          const threadDetails = await gmail.users.threads.get({
             userId: "me",
-            id: email.id,
-            requestBody: {
-              addLabelIds: labelsToAdd,
-            },
+            id: thread.id!,
           });
 
-          // Remove any of the other labels that are present
-          // This may happen if another email is sent in a thread and we need to change the labels
-          const removeLabelIds = Array.from(labelIds.values()).filter(
-            (label) => labelIds.get(label) && !labelsToAdd.includes(label),
+          const message =
+            threadDetails.data.messages?.[threadDetails.data.messages.length - 1];
+          if (!message || !message.payload?.headers) return null;
+
+          const headers = message.payload.headers;
+          const body = message.payload.parts?.find(
+            (part) => part.mimeType === "text/plain",
           );
-          if (removeLabelIds.length > 0) {
+          const base64Data = (body?.body?.data || "")
+            .replace(/-/g, "+")
+            .replace(/_/g, "/")
+            .padEnd(
+              (body?.body?.data || "").length +
+                ((4 - ((body?.body?.data || "").length % 4)) % 4),
+              "=",
+            );
+
+          const bodyText = new TextDecoder()
+            .decode(Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0)))
+            .replace(/(https?:\/\/[^\s]+)/g, "URL OMITTED");
+
+          return {
+            id: message.id!,
+            subject:
+              headers.find((h) => h.name === "Subject")?.value || "No Subject",
+            from: headers.find((h) => h.name === "From")?.value || "",
+            to: headers.find((h) => h.name === "To")?.value || "",
+            date: headers.find((h) => h.name === "Date")?.value || "",
+            snippet: message.snippet || "",
+            bodyText:
+              bodyText.length > 10000 ? message.snippet + "..." : bodyText,
+            labels: message.labelIds,
+          };
+        }),
+      );
+
+      const validEmails = emails.filter(
+        (e): e is NonNullable<typeof e> => e !== null,
+      );
+
+      // Ensure labels exist
+      const labelIds = await ensureLabelsExist(gmail, [
+        "To Read",
+        "To Reply",
+        "To Archive",
+      ]);
+
+      // Process each email
+      const results = await Promise.all(
+        validEmails.map(async (email) => {
+          // Check if email was already processed
+          if (await isEmailProcessed(emailAddress, email.id)) {
+            return null;
+          }
+
+          const formattedEmail = `From: ${email.from}\nTo: ${email.to}\nSubject: ${email.subject}\nBody: ${email.bodyText.substring(0, 5000)}`;
+          const categories = await categorizeEmail(formattedEmail, email.to);
+
+          if (!categories) return null;
+
+          const labelsToAdd: string[] = [];
+          if (categories.action === "to read") {
+            const id = labelIds.get("To Read");
+            if (id) labelsToAdd.push(id);
+          } else if (categories.action === "to reply") {
+            const id = labelIds.get("To Reply");
+            if (id) labelsToAdd.push(id);
+          } else if (categories.action === "to archive") {
+            const id = labelIds.get("To Archive");
+            if (id) labelsToAdd.push(id);
+          }
+
+          if (labelsToAdd.length > 0) {
             await gmail.users.messages.modify({
               userId: "me",
               id: email.id,
               requestBody: {
-                removeLabelIds,
+                addLabelIds: labelsToAdd,
               },
             });
+
+            // Remove any of the other labels that are present
+            // This may happen if another email is sent in a thread and we need to change the labels
+            const removeLabelIds = Array.from(labelIds.values()).filter(
+              (label) => labelIds.get(label) && !labelsToAdd.includes(label),
+            );
+            if (removeLabelIds.length > 0) {
+              await gmail.users.messages.modify({
+                userId: "me",
+                id: email.id,
+                requestBody: {
+                  removeLabelIds,
+                },
+              });
+            }
+
+            // Mark email as processed after successful modification
+            await markEmailProcessed(emailAddress, email.id);
           }
 
-          // Mark email as processed after successful modification
-          await markEmailProcessed(emailAddress, email.id);
-        }
+          return {
+            emailId: email.id,
+            categories,
+            addedLabels: labelsToAdd,
+          };
+        }),
+      );
 
-        return {
-          emailId: email.id,
-          categories,
-          addedLabels: labelsToAdd,
-        };
-      }),
-    );
+      const processedResults = results.filter(
+        (r): r is NonNullable<typeof r> => r !== null,
+      );
 
-    const processedResults = results.filter(
-      (r): r is NonNullable<typeof r> => r !== null,
-    );
+      processedCount += processedResults.length;
+      skippedCount += validEmails.length - processedResults.length;
+
+      // Get next page token if processing all emails
+      pageToken = options.processAll ? threadResponse.data.nextPageToken ?? undefined : undefined;
+      console.log("Processed", processedCount, "skipped", skippedCount, "pageToken", pageToken, "for", emailAddress);
+    } while (pageToken);
 
     return {
       email: emailAddress,
       success: true,
-      processedCount: processedResults.length,
-      skippedCount: validEmails.length - processedResults.length,
+      processedCount,
+      skippedCount,
     };
   } catch (error) {
     console.error(`Error processing emails for ${emailAddress}:`, error);
@@ -367,7 +379,10 @@ export const processUserEmails = async (
   }
 };
 
-export const processBatchEmails = async (): Promise<{
+export const processBatchEmails = async (options?: {
+  processAll?: boolean;
+  batchSize?: number;
+}): Promise<{
   success: boolean;
   results: Array<{
     email: string;
@@ -379,7 +394,7 @@ export const processBatchEmails = async (): Promise<{
 }> => {
   const allCredentials = await getAllGmailCredentials();
   const results = await Promise.all(
-    allCredentials.map(({ email }) => processUserEmails(email)),
+    allCredentials.map(({ email }) => processUserEmails(email, options)),
   );
 
   return {

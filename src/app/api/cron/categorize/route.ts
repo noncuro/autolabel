@@ -33,7 +33,10 @@ export async function GET(req: Request) {
       });
     }
 
-    const result = await processBatchEmails();
+    const result = await processBatchEmails({
+      processAll: true,
+      batchSize: 10,
+    });
     return NextResponse.json(result);
   } catch (error) {
     console.error("Error in cron job:", error);
