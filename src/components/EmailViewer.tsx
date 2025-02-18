@@ -50,15 +50,6 @@ export default function EmailViewer() {
     },
   });
 
-  const testGmailApi = trpc.gmail.testGmailApiWithRedis.useMutation({
-    onSuccess: (data) => {
-      console.log("Gmail API test successful! Found", data.labelCount, "labels");
-    },
-    onError: (error) => {
-      console.error("Gmail API test failed:", error);
-    },
-  });
-
   const handleDownload = () => {
     if (!data) return;
     const allEmails = data.pages.flatMap((page) => page.items);
@@ -165,13 +156,6 @@ export default function EmailViewer() {
             className="px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600 disabled:bg-yellow-300 text-sm"
           >
             {saveCredentials.isPending ? "Saving..." : "Save Creds to Redis"}
-          </button>
-          <button
-            onClick={() => testGmailApi.mutate()}
-            disabled={testGmailApi.isPending}
-            className="px-4 py-2 bg-indigo-500 text-white rounded hover:bg-indigo-600 disabled:bg-indigo-300 text-sm"
-          >
-            {testGmailApi.isPending ? "Testing..." : "Test Redis Gmail API"}
           </button>
         </div>
         <div className="text-sm text-gray-600">
