@@ -1,10 +1,9 @@
 import { getServerSession } from "next-auth/next";
 import { redirect } from "next/navigation";
-import EmailViewer from "../components/EmailViewer";
-import Providers from "../components/Providers";
+import EmailViewerTabs from "../components/EmailViewerTabs";
 import NavBar from "../components/NavBar";
+import Providers from "../components/Providers";
 import { authOptions } from "./api/auth/[...nextauth]/route";
-
 export default async function Home() {
   const session = await getServerSession(authOptions);
 
@@ -17,7 +16,7 @@ export default async function Home() {
       <Providers>
         <NavBar />
         <div className="p-4">
-          <EmailViewer />
+          <EmailViewerTabs />
         </div>
       </Providers>
     </main>

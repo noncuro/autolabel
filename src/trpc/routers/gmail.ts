@@ -51,7 +51,7 @@ async function getGmailLabels(
     "gmail-labels",
     JSON.stringify(Array.from(labelMap.entries())),
     "EX",
-    3600,
+    60 * 60, // 1 hour
   );
 
   return labelMap;
@@ -311,7 +311,7 @@ export const gmailRouter = router({
       const redis = getRedis();
 
       // First, ensure all possible labels exist and get their IDs
-      const possibleLabels = ["Cold Inbound", "Recruiting", "Internal", "Updates", "Promotional"];
+      const possibleLabels = ["To Read", "To Reply", "To Archive"];
       const labelMap = await getGmailLabels(ctx.gmail);
       
       const labelIds = new Map<string, string>();
@@ -345,7 +345,7 @@ export const gmailRouter = router({
       );
 
       // Invalidate cache since we might have created new labels
-      await getRedis().del("gmail-labels");
+      // await getRedis().del("gmail-labels");
 
       // Filter out already processed emails
       const emailsToProcess = await Promise.all(
@@ -435,5 +435,142 @@ export const gmailRouter = router({
       });
 
       return { success: true };
+    }),
+  getIndividualEmails: publicProcedure
+    .input(
+      z.object({
+        cursor: z.string().optional(),
+        limit: z.number().min(1).max(50).default(10),
+      }),
+    )
+    .output(
+      z.object({
+        items: z.array(EmailSchema),
+        nextCursor: z.string().optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      if (!ctx.gmail) {
+        throw new TRPCError({ code: "UNAUTHORIZED" });
+      }
+
+      try {
+        const labelMap = await getGmailLabels(ctx.gmail);
+
+        const messagesResponse = await ctx.gmail.users.messages.list({
+          userId: "me",
+          maxResults: input.limit,
+          q: "in:inbox",
+          pageToken: input.cursor,
+        });
+
+        if (!messagesResponse.data.messages?.length) {
+          return {
+            items: [],
+            nextCursor: undefined,
+          };
+        }
+
+        const messages = await Promise.all(
+          messagesResponse.data.messages.map(async (message) => {
+            const messageDetails = await ctx.gmail.users.messages.get({
+              userId: "me",
+              id: message.id!,
+            });
+
+            const headers = messageDetails.data.payload?.headers;
+            const labels =
+              messageDetails.data.labelIds?.map((labelId) => ({
+                id: labelId,
+                name: labelMap.get(labelId) || labelId,
+              })) || [];
+
+            const payload = messageDetails.data.payload;
+            const body = payload?.parts?.find(
+              (part) => part.mimeType === "text/plain",
+            );
+            
+            const base64Data = (body?.body?.data || "")
+              .replace(/-/g, "+")
+              .replace(/_/g, "/")
+              .padEnd(
+                (body?.body?.data || "").length +
+                  ((4 - ((body?.body?.data || "").length % 4)) % 4),
+                "=",
+              );
+            
+            const bodyText = new TextDecoder().decode(
+              Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0)),
+            );
+
+            const bodyTextWithoutUrls = bodyText.replace(
+              /(https?:\/\/[^\s]+)/g,
+              "URL OMITTED",
+            );
+
+            const bodyToSend =
+              bodyTextWithoutUrls.length > 10000
+                ? messageDetails.data.snippet + "..."
+                : bodyTextWithoutUrls;
+
+            return {
+              id: messageDetails.data.id!,
+              subject:
+                headers?.find((h) => h.name === "Subject")?.value ||
+                "No Subject",
+              from: headers?.find((h) => h.name === "From")?.value || "",
+              to: headers?.find((h) => h.name === "To")?.value || "",
+              date: headers?.find((h) => h.name === "Date")?.value || "",
+              snippet: messageDetails.data.snippet || "",
+              bodyText: bodyToSend,
+              labels,
+            };
+          }),
+        );
+
+        return {
+          items: messages,
+          nextCursor: messagesResponse.data.nextPageToken || undefined,
+        };
+      } catch (error) {
+        console.error("Error fetching individual emails:", error);
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Error fetching individual emails",
+        });
+      }
+    }),
+  bulkArchiveEmails: publicProcedure
+    .input(
+      z.object({
+        emailIds: z.array(z.string()),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      if (!ctx.gmail) {
+        throw new TRPCError({ code: "UNAUTHORIZED" });
+      }
+
+      try {
+        await Promise.all(
+          input.emailIds.map((emailId) =>
+            ctx.gmail!.users.messages.modify({
+              userId: "me",
+              id: emailId,
+              requestBody: {
+                removeLabelIds: ["INBOX"],
+              },
+            }),
+          ),
+        );
+
+        return { success: true };
+      } catch (error) {
+        console.error("Error bulk archiving emails:", error);
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Error archiving emails",
+        });
+      }
     }),
 });
