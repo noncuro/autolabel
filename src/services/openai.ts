@@ -23,46 +23,69 @@ const systemPrompt = `
 You are a helpful assistant that categorizes emails.
 `;
 
-const userPrompt = `
-Please categorize with a JSON response which inbox action the email should be: "to read", "to reply", or "to archive".
-
-To read: the email should be read by the user, but probably doesn't need a reply. For example, a newsletter, a product update, a blog post, or an email sent to a teammate.
-To reply: the email should be replied to by the user. For example, an important email send by a friend directly to the user, an email from a customer, client, investor, or coworker.
-To archive: the email will probably not be read by the user, and will likely be archived. For example, a promotional email, a notification from a service provider, an advertisement, a cold inbound email. 
-
-Examples:
-Cold inbound emails -> "To archive".
-Login codes -> "To archive".
-"Your order is on its way!" -> "To archive".
-"Build failed" -> "To read".
-"We're making some changes to your terms of service" -> "To archive".
-"Spot email scams with these tips" -> "To archive".
-"Are we meeting up next week?" -> "To reply".
-"It was so great meeting you last week! Should we catch up again soon?" -> "To reply".
-"I'm running late, but I'll be there in 10 minutes" -> "To reply".
-"Hi all- remember to always sign out of the computer when you're done using it" -> "To read".
-Important email sent to a teammate CC'ing the user -> "To read".
-Important email sent by a teammate to someone else -> "To read".
-"Your team is low on credits" -> "To archive".
-"App version 1.0.1 is now available" -> "To archive".
-"You're invited: How company valuations work" -> "To archive".
-"Remember to sign the lease by the 15th, or you'll be charged a late fee" -> "To reply".
-"FYI - check this out" -> "To read".
-"Here's your booking summary" -> "To read".
-
-
-You will be given an email and you will need to determine which category it belongs to.
-
-In the explanation field, mention if the email is a cold inbound email, a product update, a newsletter, a blog post, an advertisement, a notification from a service provider, or similar categories. Mention all relevant tags this email could recieve.
-
-<current_user_email>
-{user_email}
-</current_user_email>
-
-<email>
-{email}
-</email>
-`.trim();
+const userPrompt = JSON.stringify({
+  task: "Categorize an email into one of three actions: 'to read', 'to reply', or 'to archive'.",
+  categories: {
+    "to read":
+      "The email should be read but likely does not require a reply. Examples: newsletters, product updates, blog posts, or emails sent to a teammate.",
+    "to reply":
+      "The email requires a response. Examples: direct emails from a friend, customer, client, investor, or coworker.",
+    "to archive":
+      "The email can be archived without reading or responding. Examples: promotional emails, notifications, advertisements, cold inbound emails.",
+  },
+  examples: [
+    { email: "Cold inbound emails", action: "to archive" },
+    { email: "Login codes", action: "to archive" },
+    { email: "Your order is on its way!", action: "to archive" },
+    { email: "Build failed", action: "to read" },
+    {
+      email: "We're making some changes to your terms of service",
+      action: "to archive",
+    },
+    { email: "Spot email scams with these tips", action: "to archive" },
+    { email: "Are we meeting up next week?", action: "to reply" },
+    {
+      email: "It was great meeting you! Should we catch up again soon?",
+      action: "to reply",
+    },
+    {
+      email: "I'm running late, but I'll be there in 10 minutes",
+      action: "to reply",
+    },
+    { email: "Hi all — remember to sign out", action: "to read" },
+    {
+      email: "Important email sent to a teammate CC’ing you",
+      action: "to read",
+    },
+    {
+      email: "Important email sent by a teammate to someone else",
+      action: "to read",
+    },
+    { email: "Your team is low on credits", action: "to archive" },
+    { email: "App version 1.0.1 is now available", action: "to archive" },
+    {
+      email: "You're invited: How company valuations work",
+      action: "to archive",
+    },
+    {
+      email: "Remember to sign the lease by the 15th...",
+      action: "to reply",
+    },
+    { email: "FYI - check this out", action: "to read" },
+    { email: "Here’s your booking summary", action: "to read" },
+    { email: "John has joined your meeting", action: "to archive" },
+    { email: "Sam has accepted your invitation", action: "to archive" },
+  ],
+  input: {
+    current_user_email: "{user_email}",
+    email_content: "{email}",
+  },
+  output_format: {
+    explanation:
+      "Short reasoning, including comma separated tags such as 'cold inbound', 'newsletter', 'advertisement', 'notification', 'calendar', 'meeting', 'invoice', etc.",
+    action: "<to read | to reply | to archive>",
+  },
+});
 
 const PRICE_4_MINI_INPUT = 0.15 / 1_000_000;
 const PRICE_4_MINI_OUTPUT = 0.6 / 1_000_000;
@@ -76,7 +99,12 @@ export async function categorizeEmail(
     model: "gpt-4o",
     messages: [
       { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt.replace("{email}", email).replace("{user_email}", userEmail) },
+      {
+        role: "user",
+        content: userPrompt
+          .replace("{email}", email)
+          .replace("{user_email}", userEmail),
+      },
     ],
     response_format: zodResponseFormat(EmailCategorySchema, "email_category"),
   });
