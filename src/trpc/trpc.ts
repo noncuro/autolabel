@@ -45,14 +45,7 @@ export const createTRPCContext = cache(async () => {
     process.env.NEXTAUTH_URL,
   );
 
-  console.log("Setting OAuth2 credentials:", {
-    hasAccessToken: !!session.accessToken,
-    hasRefreshToken: !!session.refreshToken,
-    expiryDate: session.expiresAt
-      ? new Date(session.expiresAt * 1000).toISOString()
-      : undefined,
-    redirectUri: process.env.NEXTAUTH_URL,
-  });
+  console.log("Setting OAuth2 credentials");
 
   oauth2Client.setCredentials({
     access_token: session.accessToken,
@@ -86,8 +79,6 @@ export const createTRPCContext = cache(async () => {
     }
     return { gmail: null, userEmail: null };
   }
-
-  console.log("Session:", session)
 
   const gmail = google.gmail({ version: "v1", auth: oauth2Client });
   return { 

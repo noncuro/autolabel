@@ -17,7 +17,7 @@ interface GmailAuthResult {
 }
 
 // Add this helper function to track processed emails
-const isEmailProcessed = async (
+export const isEmailProcessed = async (
   email: string,
   messageId: string,
 ): Promise<boolean> => {
@@ -26,7 +26,7 @@ const isEmailProcessed = async (
   return result !== null;
 };
 
-const markEmailProcessed = async (
+export const markEmailProcessed = async (
   email: string,
   messageId: string,
 ): Promise<void> => {
@@ -284,7 +284,7 @@ export const processUserEmails = async (
       );
 
       // Ensure labels exist
-      const labelIds = await ensureLabelsExist(gmail, [
+      const labelNameToId = await ensureLabelsExist(gmail, [
         "To Read",
         "To Reply",
         "To Archive",
@@ -305,17 +305,18 @@ export const processUserEmails = async (
 
           const labelsToAdd: string[] = [];
           if (categories.action === "to read") {
-            const id = labelIds.get("To Read");
+            const id = labelNameToId.get("To Read");
             if (id) labelsToAdd.push(id);
           } else if (categories.action === "to reply") {
-            const id = labelIds.get("To Reply");
+            const id = labelNameToId.get("To Reply");
             if (id) labelsToAdd.push(id);
           } else if (categories.action === "to archive") {
-            const id = labelIds.get("To Archive");
+            const id = labelNameToId.get("To Archive");
             if (id) labelsToAdd.push(id);
           }
 
           if (labelsToAdd.length > 0) {
+            console.log("Adding labels", labelsToAdd);
             await gmail.users.messages.modify({
               userId: "me",
               id: email.id,
@@ -326,10 +327,11 @@ export const processUserEmails = async (
 
             // Remove any of the other labels that are present
             // This may happen if another email is sent in a thread and we need to change the labels
-            const removeLabelIds = Array.from(labelIds.values()).filter(
-              (label) => labelIds.get(label) && !labelsToAdd.includes(label),
+            const removeLabelIds = Array.from(email.labels || []).filter(
+              (label) => labelNameToId.get(label) && !labelsToAdd.includes(label),
             );
             if (removeLabelIds.length > 0) {
+              console.log("Removing labels", removeLabelIds);
               await gmail.users.messages.modify({
                 userId: "me",
                 id: email.id,

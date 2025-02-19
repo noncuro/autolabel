@@ -9,6 +9,8 @@ import { gmail_v1 } from "googleapis";
 import { getServerSession } from "next-auth";
 import { z } from "zod";
 import { publicProcedure, router } from "../trpc";
+import { markEmailProcessed } from "@/services/gmail";
+import { isEmailProcessed } from "@/services/gmail";
 
 const EmailSchema = z.object({
   id: z.string(),
@@ -362,7 +364,7 @@ export const gmailRouter = router({
       // Filter out already processed emails
       const emailsToProcess = await Promise.all(
         input.emails.map(async (email) => {
-          const processed = await redis.get(`email-processed:${email.id}`);
+          const processed = await isEmailProcessed(currentUserEmailAddress, email.id);
           return processed ? null : email;
         }),
       );
@@ -408,12 +410,7 @@ export const gmailRouter = router({
           }
 
           // Mark email as processed in Redis (keep for 30 days)
-          await redis.set(
-            `email-processed:${email.id}`,
-            "true",
-            "EX",
-            60 * 60 * 24 * 30,
-          );
+          await markEmailProcessed(currentUserEmailAddress, email.id);
 
           return {
             emailId: email.id,
