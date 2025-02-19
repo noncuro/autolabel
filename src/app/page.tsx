@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import EmailViewerTabs from "../components/EmailViewerTabs";
 import NavBar from "../components/NavBar";
 import Providers from "../components/Providers";
-import { authOptions } from "./api/auth/[...nextauth]/route";
+import { authOptions } from "./api/auth/[...nextauth]/autoOptions";
 export default async function Home() {
   const session = await getServerSession(authOptions);
 

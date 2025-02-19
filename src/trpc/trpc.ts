@@ -1,4 +1,4 @@
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import { authOptions } from "@/app/api/auth/[...nextauth]/autoOptions";
 import { initTRPC } from "@trpc/server";
 import type { gmail_v1 } from "googleapis";
 import { google } from "googleapis";

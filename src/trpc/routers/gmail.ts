@@ -1,22 +1,14 @@
-import { TRPCError } from "@trpc/server";
-import { z } from "zod";
-import { publicProcedure, router } from "../trpc";
+import { authOptions } from "@/app/api/auth/[...nextauth]/autoOptions";
+import { categorizeEmail, EmailCategorySchema } from "@/services/openai";
 import {
   getRedis,
-  saveGmailCredentials,
-  getGmailCredentials,
-  getAllGmailCredentials,
+  saveGmailCredentials
 } from "@/services/redis";
-import { categorizeEmail, EmailCategorySchema } from "@/services/openai";
+import { TRPCError } from "@trpc/server";
 import { gmail_v1 } from "googleapis";
-import { google } from "googleapis";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
-import {
-  authenticateGmail,
-  processUserEmails,
-  processBatchEmails,
-} from "@/services/gmail";
+import { z } from "zod";
+import { publicProcedure, router } from "../trpc";
 
 const EmailSchema = z.object({
   id: z.string(),
@@ -206,15 +198,12 @@ export const gmailRouter = router({
           });
 
           // Log the full error object for debugging
-          if ("config" in error) {
-            console.error("Request config:", {
-              url: (error as any).config?.url,
-              headers: (error as any).config?.headers,
-              params: (error as any).config?.params,
-            });
-          }
           if ("response" in error) {
+            // @ts-ignore
             console.error("Response data:", (error as any).response?.data);
+          }
+          else{
+            console.error("Error:", error);
           }
         }
         throw new TRPCError({
