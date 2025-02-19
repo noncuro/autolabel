@@ -316,28 +316,35 @@ export const processUserEmails = async (
           }
 
           if (labelsToAdd.length > 0) {
-            console.log("Adding labels", labelsToAdd);
-            await gmail.users.messages.modify({
-              userId: "me",
-              id: email.id,
-              requestBody: {
-                addLabelIds: labelsToAdd,
-              },
-            });
+            const existingLabelIds = new Set((email.labels || []).map(l => l.toLowerCase()));
+            const targetLabelId = labelsToAdd[0];
+            const targetLabelName = categories.action;
 
-            // Remove any of the other labels that are present
-            // This may happen if another email is sent in a thread and we need to change the labels
-            const removeLabelIds = Array.from(email.labels || []).filter(
-              (label) => labelNameToId.get(label) && !labelsToAdd.includes(label),
-            );
-            if (removeLabelIds.length > 0) {
-              console.log("Removing labels", removeLabelIds);
+            console.log({
+              existingLabelIds,
+              targetLabelId,
+              targetLabelName,
+            })
+            
+            const labelsToModify = {
+              addLabelIds: existingLabelIds.has(targetLabelId.toLowerCase()) ? [] : [targetLabelId],
+              removeLabelIds: Array.from(labelNameToId.entries())
+                .filter(([name, id]) => 
+                  // Only include management labels that aren't the target label
+                  name.toLowerCase() !== targetLabelName && 
+                  ['to read', 'to reply', 'to archive'].includes(name.toLowerCase()) &&
+                  existingLabelIds.has(id.toLowerCase())
+                )
+                .map(([, id]) => id)
+            };
+
+            // Only make API call if there are labels to add or remove
+            if (labelsToModify.addLabelIds.length > 0 || labelsToModify.removeLabelIds.length > 0) {
+              console.log("Modifying labels:", labelsToModify);
               await gmail.users.messages.modify({
                 userId: "me",
                 id: email.id,
-                requestBody: {
-                  removeLabelIds,
-                },
+                requestBody: labelsToModify,
               });
             }
 
