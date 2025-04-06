@@ -75,7 +75,8 @@ const userPrompt = JSON.stringify({
     { email: "Here’s your booking summary", action: "to read" },
     { email: "John has joined your meeting", action: "to archive" },
     { email: "Sam has accepted your invitation", action: "to archive" },
-  ],
+    { email: "App Store Connect: The status of your app, Ash - AI Therapy, is now \"Waiting for Review\"", action: "to archive" },
+  ] satisfies {email: string, action: "to read" | "to reply" | "to archive"}[],
   input: {
     current_user_email: "{user_email}",
     email_content: "{email}",
