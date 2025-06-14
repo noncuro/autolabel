@@ -31,13 +31,14 @@ const userPrompt = JSON.stringify({
     "to reply":
       "The email requires a response. Examples: direct emails from a friend, customer, client, investor, or coworker.",
     "to archive":
-      "The email can be archived without reading or responding. Examples: promotional emails, notifications, advertisements, cold inbound emails.",
+      "The email can be archived without reading or responding. Examples: promotional emails, notifications, advertisements, cold inbound emails, automated invoice emails or receipts, and bills.",
   },
   examples: [
     { email: "Cold inbound emails", action: "to archive" },
     { email: "Login codes", action: "to archive" },
     { email: "Your order is on its way!", action: "to archive" },
     { email: "Build failed", action: "to read" },
+    { email: "Brex: Your purchase requires a receipt", action: "to archive" },
     {
       email: "We're making some changes to your terms of service",
       action: "to archive",
