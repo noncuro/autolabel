@@ -22,7 +22,7 @@ const systemPrompt = `
 You are a helpful assistant that categorizes emails.
 `;
 
-const userPrompt = JSON.stringify({
+const userPrompt = {
   task: "Categorize an email into one of three actions: 'to read', 'to reply', or 'to archive'.",
   categories: {
     "to read":
@@ -38,7 +38,10 @@ const userPrompt = JSON.stringify({
     { email: "Your order is on its way!", action: "to archive" },
     { email: "Build failed", action: "to read" },
     { email: "You have a new message from your friend", action: "to archive" },
-    { email: "Action required: You have 10 expenses that need more info", action: "to archive" },
+    {
+      email: "Action required: You have 10 expenses that need more info",
+      action: "to archive",
+    },
     { email: "Brex: Your purchase requires a receipt", action: "to archive" },
     {
       email: "We're making some changes to your terms of service",
@@ -89,7 +92,8 @@ const userPrompt = JSON.stringify({
       action: "to archive",
     },
     {
-      email: "Neil Parikh marked an action item as done in the following document",
+      email:
+        "Neil Parikh marked an action item as done in the following document",
       action: "to archive",
     },
     {
@@ -97,7 +101,8 @@ const userPrompt = JSON.stringify({
       action: "to archive",
     },
     {
-      email: "Tomorrow's lunch, please confirm by 2pm today. For Monday, August 25.",
+      email:
+        "Tomorrow's lunch, please confirm by 2pm today. For Monday, August 25.",
       action: "to archive",
     },
     {
@@ -143,36 +148,40 @@ My best,`,
   output_format: {
     action: "<to read | to reply | to archive>",
   },
-});
+};
 
 const PRICE_5_MINI_INPUT = 0.25 / 1_000_000;
 const PRICE_5_MINI_OUTPUT = 2 / 1_000_000;
+const PRICE_5_INPUT = 1.25 / 1_000_000;
+const PRICE_5_OUTPUT = 10 / 1_000_000;
 
 export async function categorizeEmail(
   email: string,
   userEmail: string,
   setCost?: Dispatch<SetStateAction<number>>,
 ): Promise<EmailCategory | null> {
+  const body = { ...userPrompt };
+  body.input.email_content = email;
+  body.input.current_user_email = userEmail;
+  const messages = [
+    { role: "system" as const, content: systemPrompt },
+    {
+      role: "user" as const,
+      content: JSON.stringify(body),
+    },
+  ];
+  console.log(JSON.stringify(messages, null, 2));
   const response = await openai.chat.completions.parse({
-    model: "gpt-5-mini",
+    model: "gpt-5",
     reasoning_effort: "low",
-    messages: [
-      { role: "system", content: systemPrompt },
-      {
-        role: "user",
-        content: userPrompt
-          .replace("{email}", email)
-          .replace("{user_email}", userEmail),
-      },
-    ],
+    messages,
     response_format: zodResponseFormat(EmailCategorySchema, "email_category"),
   });
 
   // Calculate costs
   const inputTokens = response.usage?.prompt_tokens ?? 0;
   const outputTokens = response.usage?.completion_tokens ?? 0;
-  const cost =
-    PRICE_5_MINI_INPUT * inputTokens + PRICE_5_MINI_OUTPUT * outputTokens;
+  const cost = PRICE_5_INPUT * inputTokens + PRICE_5_OUTPUT * outputTokens;
   setCost?.((c) => c + cost);
 
   return response.choices[0].message.parsed ?? null;
