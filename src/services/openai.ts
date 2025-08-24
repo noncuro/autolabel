@@ -95,7 +95,7 @@ const userPrompt = JSON.stringify({
     {
       email: `Zeina Yasser Hashem resolved a comment in the following document`,
       action: "to archive",
-    }
+    },
     {
       email: "Tomorrow's lunch, please confirm by 2pm today. For Monday, August 25.",
       action: "to archive",
