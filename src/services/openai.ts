@@ -12,7 +12,6 @@ export const EmailCategorySchema = z.object({
   isUpdate: z.boolean(),
   isPromotional: z.boolean(),
   isAddressedToUser: z.boolean(),
-  explanation: z.string(),
   action: z.enum(["to read", "to reply", "to archive"]),
 });
 
@@ -38,6 +37,8 @@ const userPrompt = JSON.stringify({
     { email: "Login codes", action: "to archive" },
     { email: "Your order is on its way!", action: "to archive" },
     { email: "Build failed", action: "to read" },
+    { email: "You have a new message from your friend", action: "to archive" },
+    { email: "Action required: You have 10 expenses that need more info", action: "to archive" },
     { email: "Brex: Your purchase requires a receipt", action: "to archive" },
     {
       email: "We're making some changes to your terms of service",
@@ -69,39 +70,92 @@ const userPrompt = JSON.stringify({
       action: "to archive",
     },
     {
-      email: "Remember to sign the lease by the 15th...",
+      email: "Hey Daniel, quick reminder to sign the lease by the 15th!",
       action: "to reply",
     },
     { email: "FYI - check this out", action: "to read" },
     { email: "Here’s your booking summary", action: "to archive" },
     { email: "Accepted: Standup @ Monday 9am", action: "to archive" },
-    { email: "Calendar Invitation: Pizza Night @ Friday 6pm", action: "to archive" },
+    {
+      email: "Calendar Invitation: Pizza Night @ Friday 6pm",
+      action: "to archive",
+    },
     { email: "Receipt: Docker Invoice Paid", action: "to archive" },
     { email: "John has joined your meeting", action: "to archive" },
     { email: "Sam has accepted your invitation", action: "to archive" },
-    { email: "App Store Connect: The status of your app, Ash - AI Therapy, is now \"Waiting for Review\"", action: "to archive" },
-  ] satisfies {email: string, action: "to read" | "to reply" | "to archive"}[],
+    {
+      email:
+        'App Store Connect: The status of your app, Ash - AI Therapy, is now "Waiting for Review"',
+      action: "to archive",
+    },
+    {
+      email: "Neil Parikh marked an action item as done in the following document",
+      action: "to archive",
+    },
+    {
+      email: `Zeina Yasser Hashem resolved a comment in the following document`,
+      action: "to archive",
+    }
+    {
+      email: "Tomorrow's lunch, please confirm by 2pm today. For Monday, August 25.",
+      action: "to archive",
+    },
+    {
+      email: `From: Omar Awad <omar@revoultxmail.com>
+To:   danielc@slingshot.xyz
+
+Subject: Daniel, your thoughts on speeding up the hiring process...
+
+Hi Daniel,
+congrats on launching the AI Therapy app, crafting an empathetic digital companion that values user autonomy is truly making mental health support more accessible.
+Saw your opening for a Senior Product Engineer at Slingshot AI, live since Jul 21. We can deliver a few vetted candidate profiles within 72 hours to help close the staffing gap and keep your team moving.
+You only pay if you hire - zero upfront risk - all placements come with a 90-day candidate coverage.
+Our team brings over 20 years of combined technical recruiting experience, specializing in placing highly skilled talents at fast-growing teams like Ambience AI, BlockFi, and NeuralChain Labs
+Worth a quick 15-minute chat?
+Best regards,
+Omar`,
+      action: "to archive",
+    },
+    {
+      email: `From: Adam Pollack <adam@drivecapital.com>
+To:   daniel@slingshot.xyz
+
+Subject: Drive Capital/ Founder, Thiel Fellow
+
+Hi Daniel!
+I am a Partner at Drive Capital, a $3B fund focused on backing founders outside of Silicon Valley with check sizes ranging from 500K to $200M as a lead investor. Prior to Drive, I was a founder and turned to the dark side (VC) after my company was acquired.
+I heard about Slingshot through the Thiel ecosystem and am very interested in what you're building. LMK if you got 30 minutes this week or next to explore ways we might be able to work together now or down the line.
+My best,`,
+      action: "to archive",
+    },
+    {
+      email: "[Ashby] Your Daily Interview Briefing",
+      action: "to archive",
+    },
+  ] satisfies {
+    email: string;
+    action: "to read" | "to reply" | "to archive";
+  }[],
   input: {
     current_user_email: "{user_email}",
     email_content: "{email}",
   },
   output_format: {
-    explanation:
-      "Short reasoning, including comma separated tags such as 'cold inbound', 'newsletter', 'advertisement', 'notification', 'calendar', 'meeting', 'invoice', etc.",
     action: "<to read | to reply | to archive>",
   },
 });
 
-const PRICE_4_MINI_INPUT = 0.15 / 1_000_000;
-const PRICE_4_MINI_OUTPUT = 0.6 / 1_000_000;
+const PRICE_5_MINI_INPUT = 0.25 / 1_000_000;
+const PRICE_5_MINI_OUTPUT = 2 / 1_000_000;
 
 export async function categorizeEmail(
   email: string,
   userEmail: string,
   setCost?: Dispatch<SetStateAction<number>>,
 ): Promise<EmailCategory | null> {
-  const response = await openai.beta.chat.completions.parse({
-    model: "gpt-4o",
+  const response = await openai.chat.completions.parse({
+    model: "gpt-5-mini",
+    reasoning_effort: "low",
     messages: [
       { role: "system", content: systemPrompt },
       {
@@ -118,7 +172,7 @@ export async function categorizeEmail(
   const inputTokens = response.usage?.prompt_tokens ?? 0;
   const outputTokens = response.usage?.completion_tokens ?? 0;
   const cost =
-    PRICE_4_MINI_INPUT * inputTokens + PRICE_4_MINI_OUTPUT * outputTokens;
+    PRICE_5_MINI_INPUT * inputTokens + PRICE_5_MINI_OUTPUT * outputTokens;
   setCost?.((c) => c + cost);
 
   return response.choices[0].message.parsed ?? null;
